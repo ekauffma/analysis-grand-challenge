@@ -13,6 +13,10 @@ jupyter:
     name: python3
 ---
 
+# ttbar Analysis - Signal vs Background Classification Training
+
+This is the training notebook for the signal vs background classification test. Two neural networks (identical architecture) are trained for the two analysis regions used in the AGC notebook (4j1b and 4j2b). The trained models are saved to both PyTorch and ONNX files.
+
 ```python
 import asyncio
 import time
@@ -350,6 +354,23 @@ class dataset(Dataset):
     
 ```
 
+```python
+#defining the network
+from torch import nn
+from torch.nn import functional as F
+class Net(nn.Module):
+    def __init__(self,input_shape):
+        super(Net,self).__init__()
+        self.fc1 = nn.Linear(input_shape,32)
+        self.fc2 = nn.Linear(32,64)
+        self.fc3 = nn.Linear(64,1)
+    def forward(self,x):
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        x = torch.sigmoid(self.fc3(x))
+        return x
+```
+
 # 4j1b Training
 
 ```python
@@ -382,23 +403,6 @@ train, validation = random_split(data,
 ```python
 trainloader = DataLoader(train,batch_size=64,shuffle=False)
 valloader = DataLoader(validation,batch_size=len(validation),shuffle=False)
-```
-
-```python
-#defining the network
-from torch import nn
-from torch.nn import functional as F
-class Net(nn.Module):
-    def __init__(self,input_shape):
-        super(Net,self).__init__()
-        self.fc1 = nn.Linear(input_shape,32)
-        self.fc2 = nn.Linear(32,64)
-        self.fc3 = nn.Linear(64,1)
-    def forward(self,x):
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        x = torch.sigmoid(self.fc3(x))
-        return x
 ```
 
 ```python
@@ -497,10 +501,10 @@ output_4j2b, metrics_4j2b = run(fileset,
 # combine inputs and labels from different processes
 inputs = []
 labels = []
-for key in output_4j1b["features"].keys():
+for key in output_4j2b["features"].keys():
     if 'nominal' in key:
-        inputs += output_4j1b["features"][key]
-        labels += output_4j1b["labels"][key]
+        inputs += output_4j2b["features"][key]
+        labels += output_4j2b["labels"][key]
         
 # create dataset
 data = dataset(inputs,labels)

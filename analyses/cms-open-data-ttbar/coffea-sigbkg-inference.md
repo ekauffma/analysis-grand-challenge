@@ -6,7 +6,7 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.14.1
+      jupytext_version: 1.14.0
   kernelspec:
     display_name: Python 3 (ipykernel)
     language: python
@@ -135,6 +135,7 @@ PIPELINE = "coffea"
 
 # enable Dask (may not work yet in combination with ServiceX outside of coffea-casa)
 USE_DASK = False
+USE_DASK = True
 
 # ServiceX behavior: ignore cache with repeated queries
 SERVICEX_IGNORE_CACHE = True
@@ -161,8 +162,8 @@ DISABLE_PROCESSING = False
 IO_FILE_PERCENT = 4
 
 # pytorch trained models (separated by region)
-TRAINED_MODEL_4j1b = torch.load("trained_model_4j1b.pt")
-TRAINED_MODEL_4j2b = torch.load("trained_model_4j2b.pt")
+TRAINED_MODEL_4j1b = torch.load("models/trained_model_4j1b.pt")
+TRAINED_MODEL_4j2b = torch.load("models/trained_model_4j2b.pt")
 ```
 
 ### Defining our `coffea` Processor

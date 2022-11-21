@@ -6,7 +6,7 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.14.1
+      jupytext_version: 1.14.0
   kernelspec:
     display_name: Python 3 (ipykernel)
     language: python
@@ -475,7 +475,7 @@ import torch.onnx
 # Export the model
 torch.onnx.export(model,                     # model being run
                   x,                         # model input (or a tuple for multiple inputs)
-                  "trained_model_4j1b.onnx",   # where to save the model (can be a file or file-like object)
+                  "models/trained_model_4j1b.onnx",   # where to save the model (can be a file or file-like object)
                   export_params=True,        # store the trained parameter weights inside the model file
                   opset_version=10,          # the ONNX version to export the model to
                   do_constant_folding=True,  # whether to execute constant folding for optimization
@@ -486,7 +486,7 @@ torch.onnx.export(model,                     # model being run
 ```
 
 ```python
-torch.save(model, "trained_model_4j1b.pt")
+torch.save(model, "models/trained_model_4j1b.pt")
 ```
 
 # 4j2b Training
@@ -593,7 +593,7 @@ import torch.onnx
 # Export the model
 torch.onnx.export(model,                     # model being run
                   x,                         # model input (or a tuple for multiple inputs)
-                  "trained_model_4j2b.onnx",   # where to save the model (can be a file or file-like object)
+                  "models/trained_model_4j2b.onnx",   # where to save the model (can be a file or file-like object)
                   export_params=True,        # store the trained parameter weights inside the model file
                   opset_version=10,          # the ONNX version to export the model to
                   do_constant_folding=True,  # whether to execute constant folding for optimization
@@ -604,5 +604,5 @@ torch.onnx.export(model,                     # model being run
 ```
 
 ```python
-torch.save(model, "trained_model_4j2b.pt")
+torch.save(model, "models/trained_model_4j2b.pt")
 ```

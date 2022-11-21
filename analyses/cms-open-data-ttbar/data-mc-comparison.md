@@ -42,6 +42,17 @@ logging.getLogger("cabinetry").setLevel(logging.INFO)
 ```
 
 ```python
+xsec_info = {
+    "ttbar": 396.87 + 332.97, # nonallhad + allhad, keep same x-sec for all
+    "single_top_s_chan": 2.0268 + 1.2676,
+    "single_top_t_chan": (36.993 + 22.175)/0.252,  # scale from lepton filter to inclusive
+    "single_top_tW": 37.936 + 37.906,
+    "wjets": 61457 * 0.252,  # e/mu+nu final states
+    "data": None
+}
+```
+
+```python
 class AGCSchema(BaseSchema):
     # credit to Mat Adamec for implementing this schema
     def __init__(self, base_form):
@@ -168,7 +179,7 @@ def get_top_mass(events):
     # at least four jets
     event_filters = event_filters & (ak.count(selected_jets.pt, axis=1) >= 4)
     # at least two b-tagged jets ("tag" means score above threshold)
-    B_TAG_THRESHOLD = 0.5
+    B_TAG_THRESHOLD = 0.8
     event_filters = event_filters & (ak.sum(selected_jets.btag > B_TAG_THRESHOLD, axis=1) >= 2)
 
     # apply filters
@@ -184,6 +195,41 @@ def get_top_mass(events):
     reconstructed_top_mass = ak.flatten(trijet_mass) 
     
     return reconstructed_top_mass
+```
+
+```python
+def get_ht(events):
+    
+        # pT > 25 GeV for leptons & jets    
+    selected_electrons = events.Electron[events.Electron.pt > 25]
+    selected_muons = events.Muon[events.Muon.pt > 25]
+    selected_jets = events.Jet[events.Jet.pt > 25]
+
+    # single lepton requirement
+    event_filters = ((ak.count(selected_electrons.pt, axis=1) + ak.count(selected_muons.pt, axis=1)) == 1)
+    # at least four jets
+    event_filters = event_filters & (ak.count(selected_jets.pt, axis=1) >= 4)
+    # at least two b-tagged jets ("tag" means score above threshold)
+    B_TAG_THRESHOLD = 0.8
+    event_filters = event_filters & (ak.sum(selected_jets.btag > B_TAG_THRESHOLD, axis=1) == 2)
+    
+    # apply filters
+    selected_jets = selected_jets[event_filters]
+    
+    ht = ak.sum(selected_jets.pt, axis=-1)
+    
+    return ht
+```
+
+```python
+def get_weights(events, process, xsec_info=xsec_info):
+    if not process in xsec_info.keys():
+        raise NameError(f"{process} not in {xsec_info.keys()}")
+        
+    x_sec = xsec_info[process]
+    nevts_total = len(events)
+    lumi = 3378 # /pb
+    return x_sec * lumi / nevts_total
 ```
 
 ```python
@@ -214,6 +260,15 @@ events_wj = process_events("https://xrootd-local.unl.edu:1094//store/user/AGC/na
 ```
 
 ```python
+# get weights
+weights_tt = get_weights(events_tt, "ttbar")
+weights_sc = get_weights(events_sc, "single_top_s_chan")
+weights_tc = get_weights(events_tc, "single_top_t_chan")
+weights_tw = get_weights(events_tw, "single_top_tW")
+weights_wj = get_weights(events_wj, "wjets")
+```
+
+```python
 topmass_tt = get_top_mass(events_tt)
 topmass_sc = get_top_mass(events_sc)
 topmass_tc = get_top_mass(events_tc)
@@ -222,9 +277,19 @@ topmass_wj = get_top_mass(events_wj)
 ```
 
 ```python
+ht_tt = get_ht(events_tt)
+ht_sc = get_ht(events_sc)
+ht_tc = get_ht(events_tc)
+ht_tw = get_ht(events_tw)
+ht_wj = get_ht(events_wj)
+```
+
+```python
+# define topmass histogram
+
 bin_low = 50
-bin_high = 500
-num_bins = 100
+bin_high = 550
+num_bins = 25
 name = "topmass"
 label = "topmass"
 
@@ -235,14 +300,55 @@ topmass_hist = (hist.Hist.new.Reg(num_bins, bin_low, bin_high, name=name, label=
 ```
 
 ```python
-fig,ax = plt.subplots(1,1,figsize=(8,8))
-bins = np.linspace(50,500,100)
-ax.hist(topmass_tt, bins=bins, histtype='step', density=True)
-ax.hist(topmass_sc, bins=bins, histtype='step', density=True)
-ax.hist(topmass_tc, bins=bins, histtype='step', density=True)
-ax.hist(topmass_tw, bins=bins, histtype='step', density=True)
-ax.hist(topmass_wj, bins=bins, histtype='step', density=True)
-ax.legend(["ttbar","s channel","t channel","tW","W jets"])
+# fill histogram
+topmass_hist.fill(topmass_tt, process = "ttbar", weight = weights_tt)
+topmass_hist.fill(topmass_sc, process = "single_top_s_chan", weight = weights_sc)
+topmass_hist.fill(topmass_wj, process = "wjets", weight = weights_wj)
+topmass_hist.fill(topmass_tw, process = "single_top_tW", weight = weights_tw)
+topmass_hist.fill(topmass_tc, process = "single_top_t_chan", weight = weights_tc)
+```
+
+```python
+utils.set_style()
+
+topmass_hist.stack("process")[::-1].plot(stack=True, histtype="fill", linewidth=1, edgecolor="grey")
+plt.legend(frameon=False)
+plt.title("NanoAOD")
+plt.xlabel("$m_{bjj}$ [Gev]");
+plt.show()
+```
+
+```python
+# define ht histogram
+
+bin_low = 50
+bin_high = 550
+num_bins = 25
+name = "ht"
+label = "ht"
+
+ht_hist = (hist.Hist.new.Reg(num_bins, bin_low, bin_high, name=name, label=label)
+                .StrCat([], name="process", label="Process", growth=True)
+                .Weight()
+               )
+```
+
+```python
+# fill histogram
+ht_hist.fill(ht_tt, process = "ttbar", weight = weights_tt)
+ht_hist.fill(ht_sc, process = "single_top_s_chan", weight = weights_sc)
+ht_hist.fill(ht_wj, process = "wjets", weight = weights_wj)
+ht_hist.fill(ht_tw, process = "single_top_tW", weight = weights_tw)
+ht_hist.fill(ht_tc, process = "single_top_t_chan", weight = weights_tc)
+```
+
+```python
+utils.set_style()
+
+ht_hist[120j::hist.rebin(2),:].stack("process")[::-1].plot(stack=True, histtype="fill", linewidth=1, edgecolor="grey")
+plt.legend(frameon=False)
+plt.title("NanoAOD")
+plt.xlabel("$H_T$ [Gev]");
 plt.show()
 ```
 

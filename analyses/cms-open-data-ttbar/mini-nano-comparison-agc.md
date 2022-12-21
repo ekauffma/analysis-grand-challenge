@@ -13,21 +13,22 @@ jupyter:
     name: python3
 ---
 
+# Comparing AGC Plots from nanoAOD and miniAOD
+
 ```python
-import asyncio
+## IMPORTS
 import logging
 import os
 import time
-import urllib
-import warnings
 
 import awkward as ak
 from coffea.nanoevents import NanoAODSchema
 from coffea import processor
 from coffea.processor import servicex
-from coffea.nanoevents import transforms, NanoEventsFactory
+from coffea.nanoevents import transforms
 from coffea.nanoevents.methods import base, vector
 from coffea.nanoevents.schemas.base import BaseSchema, zip_forms
+
 import hist
 import json
 import matplotlib.pyplot as plt
@@ -43,7 +44,7 @@ logging.basicConfig(format="%(levelname)s - %(name)s - %(message)s")
 ### GLOBAL CONFIGURATION
 
 # input files per process, set to e.g. 10 (smaller number = faster)
-N_FILES_MAX_PER_SAMPLE = 10
+N_FILES_MAX_PER_SAMPLE = 30
 
 # pipeline to use:
 # - "coffea" for pure coffea setup
@@ -53,9 +54,6 @@ PIPELINE = "coffea"
 
 # enable Dask (may not work yet in combination with ServiceX outside of coffea-casa)
 USE_DASK = True
-
-# ServiceX behavior: ignore cache with repeated queries
-SERVICEX_IGNORE_CACHE = False
 
 # analysis facility: set to "coffea_casa" for coffea-casa environments, "EAF" for FNAL, "local" for local setups
 AF = "coffea_casa"
@@ -82,6 +80,7 @@ IO_FILE_PERCENT = 4
 ```
 
 ```python
+## DEFINE COFFEA PROCESSOR
 processor_base = processor.ProcessorABC if (PIPELINE != "servicex_processor") else servicex.Analysis
 
 # functions creating systematic variations
@@ -115,6 +114,8 @@ class TtbarAnalysis(processor_base):
             .StrCat(["4j1b", "4j2b"], name="region", label="Region")
             .StrCat([], name="process", label="Process", growth=True)
             .StrCat([], name="variation", label="Systematic variation", growth=True)
+            .Reg(num_bins, 25, 150, name = "leptonpt", label = "Lepton $p_T$ [GeV]")
+            .IntCat(range(4,11), name="njet", label="Number of Jets")
             .Weight()
         )
         self.disable_processing = disable_processing
@@ -232,6 +233,8 @@ class TtbarAnalysis(processor_base):
                         region_filter = ak.sum(selected_jets.btag >= B_TAG_THRESHOLD, axis=1) == 1
                     
                     selected_jets_region = selected_jets[region_filter]
+                    selected_electrons_region = selected_electrons[region_filter]
+                    selected_muons_region = selected_muons[region_filter]
                     
                     # use HT (scalar sum of jet pT) as observable
                     pt_var_modifier = (
@@ -240,6 +243,8 @@ class TtbarAnalysis(processor_base):
                         else events[pt_var][jet_filter][event_filters][region_filter]
                     )
                     observable = ak.sum(selected_jets_region.pt * pt_var_modifier, axis=-1)
+                    lepton_pt = ak.sum(selected_electrons_region.pt,axis=-1) + ak.sum(selected_muons_region.pt,axis=-1)
+                    njet = [len(evt) for evt in selected_jets_region]
 
                 elif region == "4j2b":
                     
@@ -249,6 +254,8 @@ class TtbarAnalysis(processor_base):
                         region_filter = ak.sum(selected_jets.btag > B_TAG_THRESHOLD, axis=1) >= 2
                     
                     selected_jets_region = selected_jets[region_filter]
+                    selected_electrons_region = selected_electrons[region_filter]
+                    selected_muons_region = selected_muons[region_filter]
 
                     # reconstruct hadronic top as bjj system with largest pT
                     # the jet energy scale / resolution effect is not propagated to this observable at the moment
@@ -264,13 +271,15 @@ class TtbarAnalysis(processor_base):
                     # pick trijet candidate with largest pT and calculate mass of system
                     trijet_mass = trijet["p4"][ak.argmax(trijet.p4.pt, axis=1, keepdims=True)].mass
                     observable = ak.flatten(trijet_mass)
+                    lepton_pt = ak.sum(selected_electrons_region.pt,axis=-1) + ak.sum(selected_muons_region.pt,axis=-1) 
+                    njet = [len(evt) for evt in selected_jets_region]
 
                 ### histogram filling
                 if pt_var == "pt_nominal":
                     # nominal pT, but including 2-point systematics
                     histogram.fill(
                             observable=observable, region=region, process=process,
-                            variation=variation, weight=xsec_weight
+                            variation=variation, leptonpt=lepton_pt, njet=njet, weight=xsec_weight
                         )
 
                     if variation == "nominal":
@@ -283,7 +292,8 @@ class TtbarAnalysis(processor_base):
                                 # fill histograms
                                 histogram.fill(
                                     observable=observable, region=region, process=process,
-                                    variation=f"{weight_name}_{direction}", weight=xsec_weight*weight_variation
+                                    variation=f"{weight_name}_{direction}", leptonpt=lepton_pt, 
+                                    njet=njet, weight=xsec_weight*weight_variation
                                 )
 
                         # calculate additional systematics: b-tagging variations
@@ -296,14 +306,15 @@ class TtbarAnalysis(processor_base):
                                     weight_variation = 1 # no events selected
                                 histogram.fill(
                                     observable=observable, region=region, process=process,
-                                    variation=f"{weight_name}_{direction}", weight=xsec_weight*weight_variation
+                                    variation=f"{weight_name}_{direction}", leptonpt=lepton_pt, 
+                                    njet=njet, weight=xsec_weight*weight_variation
                                 )
 
                 elif variation == "nominal":
                     # pT variations for nominal samples
                     histogram.fill(
                             observable=observable, region=region, process=process,
-                            variation=pt_var, weight=xsec_weight
+                            variation=pt_var, leptonpt=lepton_pt, njet=njet, weight=xsec_weight
                         )
 
         output = {"nevents": {events.metadata["dataset"]: len(events)}, "hist": histogram}
@@ -315,6 +326,7 @@ class TtbarAnalysis(processor_base):
 ```
 
 ```python
+# CUSTOM SCHEMA FOR MINIAOD
 class AGCSchema(BaseSchema):
     def __init__(self, base_form):
         super().__init__(base_form)
@@ -349,6 +361,7 @@ class AGCSchema(BaseSchema):
 ```
 
 ```python tags=[]
+# GET PATHS TO FILES
 fileset_mini = utils.construct_fileset(N_FILES_MAX_PER_SAMPLE, 
                                        use_xcache=False, 
                                        af_name=AF_NAME)
@@ -360,6 +373,25 @@ fileset_nano = utils.construct_fileset(N_FILES_MAX_PER_SAMPLE,
 ```
 
 ```python
+# PROCESS NANOAOD
+
+if USE_DASK:
+    executor = processor.DaskExecutor(client=utils.get_client(AF))
+else:
+    executor = processor.FuturesExecutor(workers=NUM_CORES)
+
+run = processor.Runner(executor=executor, schema=NanoAODSchema, savemetrics=True, metadata_cache={}, chunksize=CHUNKSIZE)
+
+filemeta = run.preprocess(fileset_nano, treename="Events")  # pre-processing
+
+t0 = time.monotonic()
+all_histograms, metrics = run(fileset_nano, "Events", processor_instance=TtbarAnalysis(DISABLE_PROCESSING, IO_FILE_PERCENT, filetype="nanoAOD"))  # processing
+exec_time = time.monotonic() - t0
+all_histograms_nano = all_histograms["hist"]
+```
+
+```python
+# PROCESS MINIAOD
 if PIPELINE == "coffea":
     if USE_DASK:
         executor = processor.DaskExecutor(client=utils.get_client(AF))
@@ -376,22 +408,7 @@ if PIPELINE == "coffea":
     all_histograms_mini = all_histograms["hist"]
 ```
 
-```python
-if PIPELINE == "coffea":
-    if USE_DASK:
-        executor = processor.DaskExecutor(client=utils.get_client(AF))
-    else:
-        executor = processor.FuturesExecutor(workers=NUM_CORES)
-
-    run = processor.Runner(executor=executor, schema=NanoAODSchema, savemetrics=True, metadata_cache={}, chunksize=CHUNKSIZE)
-
-    filemeta = run.preprocess(fileset_nano, treename="Events")  # pre-processing
-
-    t0 = time.monotonic()
-    all_histograms, metrics = run(fileset_nano, "Events", processor_instance=TtbarAnalysis(DISABLE_PROCESSING, IO_FILE_PERCENT, filetype="nanoAOD"))  # processing
-    exec_time = time.monotonic() - t0
-    all_histograms_nano = all_histograms["hist"]
-```
+# Stack Plots
 
 ```python
 utils.set_style()
@@ -401,12 +418,15 @@ fig,axs = plt.subplots(2,1,figsize=(6,10),sharex=True)
 all_histograms_mini[120j::hist.rebin(2), 
                     "4j1b", 
                     ["ttbar","single_top_s_chan","single_top_t_chan","single_top_tW","wjets"], 
-                    "nominal"
-                   ].stack("process")[::-1].plot(stack=True, 
-                                                 histtype="fill", 
-                                                 linewidth=1, 
-                                                 edgecolor="grey",
-                                                 ax=axs[0])
+                    "nominal",
+                    :,
+                    :
+                   ].stack("process")[::-1].project("observable").plot(stack=True, 
+                                                                       histtype="fill", 
+                                                                       linewidth=1, 
+                                                                       edgecolor="grey",
+                                                                       ax=axs[0])
+
 axs[0].legend(frameon=False)
 axs[0].set_title("miniAOD: >= 4 jets, 1 b-tag")
 axs[0].set_xlabel("HT [GeV]")
@@ -414,12 +434,14 @@ axs[0].set_xlabel("HT [GeV]")
 all_histograms_nano[120j::hist.rebin(2), 
                     "4j1b", 
                     ["ttbar","single_top_s_chan","single_top_t_chan","single_top_tW","wjets"], 
-                    "nominal"
-                   ].stack("process")[::-1].plot(stack=True, 
-                                                 histtype="fill", 
-                                                 linewidth=1, 
-                                                 edgecolor="grey",
-                                                 ax=axs[1])
+                    "nominal",
+                    :,
+                    :
+                   ].stack("process")[::-1].project("observable").plot(stack=True, 
+                                                                       histtype="fill", 
+                                                                       linewidth=1, 
+                                                                       edgecolor="grey",
+                                                                       ax=axs[1])
 axs[1].legend(frameon=False)
 axs[1].set_title("nanoAOD: >= 4 jets, 1 b-tag")
 axs[1].set_xlabel("HT [GeV]")
@@ -435,12 +457,14 @@ fig,axs = plt.subplots(2,1,figsize=(6,10),sharex=True)
 all_histograms_mini[120j::hist.rebin(2), 
                     "4j2b", 
                     ["ttbar","single_top_s_chan","single_top_t_chan","single_top_tW","wjets"], 
-                    "nominal"
-                   ].stack("process")[::-1].plot(stack=True, 
-                                                 histtype="fill", 
-                                                 linewidth=1, 
-                                                 edgecolor="grey",
-                                                 ax=axs[0])
+                    "nominal",
+                    :,
+                    :
+                   ].stack("process")[::-1].project("observable").plot(stack=True, 
+                                                                       histtype="fill", 
+                                                                       linewidth=1, 
+                                                                       edgecolor="grey",
+                                                                       ax=axs[0])
 axs[0].legend(frameon=False)
 axs[0].set_title("miniAOD: >= 4 jets, >= 2 b-tags")
 axs[0].set_xlabel("$m_{bjj}$ [GeV]")
@@ -448,12 +472,14 @@ axs[0].set_xlabel("$m_{bjj}$ [GeV]")
 all_histograms_nano[120j::hist.rebin(2), 
                     "4j2b", 
                     ["ttbar","single_top_s_chan","single_top_t_chan","single_top_tW","wjets"], 
-                    "nominal"
-                   ].stack("process")[::-1].plot(stack=True, 
-                                                 histtype="fill", 
-                                                 linewidth=1, 
-                                                 edgecolor="grey",
-                                                 ax=axs[1])
+                    "nominal",
+                    :,
+                    :
+                   ].stack("process")[::-1].project("observable").plot(stack=True, 
+                                                                       histtype="fill", 
+                                                                       linewidth=1, 
+                                                                       edgecolor="grey",
+                                                                       ax=axs[1])
 axs[1].legend(frameon=False)
 axs[1].set_title("nanoAOD: >= 4 jets, >= 2 b-tags")
 axs[1].set_xlabel("$m_{bjj}$ [GeV]")
@@ -462,11 +488,197 @@ plt.show()
 ```
 
 ```python
-hist1 = all_histograms_mini[:, :, "single_top_t_chan", "nominal",:,:].project("leptonpt")
-hist2 = all_histograms_nano[:, :, "single_top_t_chan", "nominal",:,:].project("leptonpt")
+utils.set_style()
 
-print("Sum of Hist 1 = ", hist1.sum())
-print("Sum of Hist 2 = ", hist2.sum())
+fig,axs = plt.subplots(2,1,figsize=(6,10),sharex=True)
+
+all_histograms_mini[:, 
+                    "4j1b", 
+                    ["ttbar","single_top_s_chan","single_top_t_chan","single_top_tW","wjets"], 
+                    "nominal",
+                    :,
+                    :
+                   ].stack("process")[::-1].project("leptonpt").plot(stack=True, 
+                                                                     histtype="fill", 
+                                                                     linewidth=1, 
+                                                                     edgecolor="grey",
+                                                                     ax=axs[0])
+axs[0].legend(frameon=False)
+axs[0].set_title("miniAOD: >= 4 jets, 1 b-tag")
+axs[0].set_xlabel("Lepton $p_T$ [GeV]")
+
+all_histograms_nano[:, 
+                    "4j1b", 
+                    ["ttbar","single_top_s_chan","single_top_t_chan","single_top_tW","wjets"], 
+                    "nominal",
+                    :,
+                    :
+                   ].stack("process")[::-1].project("leptonpt").plot(stack=True, 
+                                                                     histtype="fill", 
+                                                                     linewidth=1, 
+                                                                     edgecolor="grey",
+                                                                     ax=axs[1])
+axs[1].legend(frameon=False)
+axs[1].set_title("nanoAOD: >= 4 jets, 1 b-tag")
+axs[1].set_xlabel("Lepton $p_T$ [GeV]")
+
+plt.show()
+```
+
+```python
+utils.set_style()
+
+fig,axs = plt.subplots(2,1,figsize=(6,10),sharex=True)
+
+all_histograms_mini[:, 
+                    "4j2b", 
+                    ["ttbar","single_top_s_chan","single_top_t_chan","single_top_tW","wjets"], 
+                    "nominal",
+                    :,
+                    :
+                   ].stack("process")[::-1].project("leptonpt").plot(stack=True, 
+                                                                     histtype="fill", 
+                                                                     linewidth=1, 
+                                                                     edgecolor="grey",
+                                                                     ax=axs[0])
+axs[0].legend(frameon=False)
+axs[0].set_title("miniAOD: >= 4 jets, >= 2 b-tags")
+axs[0].set_xlabel("Lepton $p_T$ [GeV]")
+
+all_histograms_nano[:, 
+                    "4j2b", 
+                    ["ttbar","single_top_s_chan","single_top_t_chan","single_top_tW","wjets"], 
+                    "nominal",
+                    :,
+                    :
+                   ].stack("process")[::-1].project("leptonpt").plot(stack=True, 
+                                                                     histtype="fill", 
+                                                                     linewidth=1, 
+                                                                     edgecolor="grey",
+                                                                     ax=axs[1])
+axs[1].legend(frameon=False)
+axs[1].set_title("nanoAOD: >= 4 jets, >= 2 b-tags")
+axs[1].set_xlabel("Lepton $p_T$ [GeV]")
+
+plt.show()
+```
+
+```python
+utils.set_style()
+
+fig,axs = plt.subplots(2,1,figsize=(6,10),sharex=True)
+
+all_histograms_mini[:, 
+                    "4j1b", 
+                    ["ttbar","single_top_s_chan","single_top_t_chan","single_top_tW","wjets"], 
+                    "nominal",
+                    :,
+                    :
+                   ].stack("process")[::-1].project("njet").plot(stack=True, 
+                                                                 histtype="fill", 
+                                                                 linewidth=1, 
+                                                                 edgecolor="grey",
+                                                                 ax=axs[0])
+axs[0].legend(frameon=False)
+axs[0].set_title("miniAOD: >= 4 jets, 1 b-tag")
+axs[0].set_xlabel("Number of Jets")
+
+all_histograms_nano[:, 
+                    "4j1b", 
+                    ["ttbar","single_top_s_chan","single_top_t_chan","single_top_tW","wjets"], 
+                    "nominal",
+                    :,
+                    :
+                   ].stack("process")[::-1].project("njet").plot(stack=True, 
+                                                                 histtype="fill", 
+                                                                 linewidth=1, 
+                                                                 edgecolor="grey",
+                                                                 ax=axs[1])
+axs[1].legend(frameon=False)
+axs[1].set_title("nanoAOD: >= 4 jets, 1 b-tag")
+axs[1].set_xlabel("Number of Jets")
+
+plt.show()
+```
+
+# Pull Plots
+
+```python
+hist1 = all_histograms_mini[120j::hist.rebin(2), "4j1b", :, "nominal",:,:].project("observable")
+hist2 = all_histograms_nano[120j::hist.rebin(2), "4j1b", :, "nominal",:,:].project("observable")
+
+print("Hist 1 Sum = ", hist1.sum())
+print("Hist 2 Sum = ", hist2.sum())
+
+main_ax_artists, sublot_ax_artists = hist1.plot_ratio(hist2, 
+                                                      rp_num_label="miniAOD",
+                                                      rp_denom_label="nanoAOD")
+
+plt.show()
+```
+
+```python
+hist1 = all_histograms_mini[120j::hist.rebin(2), "4j2b", :, "nominal",:,:].project("observable")
+hist2 = all_histograms_nano[120j::hist.rebin(2), "4j2b", :, "nominal",:,:].project("observable")
+
+print("Hist 1 Sum = ", hist1.sum())
+print("Hist 2 Sum = ", hist2.sum())
+
+main_ax_artists, sublot_ax_artists = hist1.plot_ratio(hist2, 
+                                                      rp_num_label="miniAOD",
+                                                      rp_denom_label="nanoAOD")
+
+plt.show()
+```
+
+```python
+hist1 = all_histograms_mini[:, "4j1b", :, "nominal",:,:].project("leptonpt")
+hist2 = all_histograms_nano[:, "4j1b", :, "nominal",:,:].project("leptonpt")
+
+print("Hist 1 Sum = ", hist1.sum())
+print("Hist 2 Sum = ", hist2.sum())
+
+main_ax_artists, sublot_ax_artists = hist1.plot_ratio(hist2, 
+                                                      rp_num_label="miniAOD",
+                                                      rp_denom_label="nanoAOD")
+
+plt.show()
+```
+
+```python
+hist1 = all_histograms_mini[:, "4j2b", :, "nominal",:,:].project("leptonpt")
+hist2 = all_histograms_nano[:, "4j2b", :, "nominal",:,:].project("leptonpt")
+
+print("Hist 1 Sum = ", hist1.sum())
+print("Hist 2 Sum = ", hist2.sum())
+
+main_ax_artists, sublot_ax_artists = hist1.plot_ratio(hist2, 
+                                                      rp_num_label="miniAOD",
+                                                      rp_denom_label="nanoAOD")
+
+plt.show()
+```
+
+```python
+hist1 = all_histograms_mini[:, "4j1b", :, "nominal",:,:].project("njet")
+hist2 = all_histograms_nano[:, "4j1b", :, "nominal",:,:].project("njet")
+
+print("Hist 1 Sum = ", hist1.sum())
+print("Hist 2 Sum = ", hist2.sum())
+
+main_ax_artists, sublot_ax_artists = hist1.plot_ratio(hist2, 
+                                                      rp_num_label="miniAOD",
+                                                      rp_denom_label="nanoAOD")
+
+plt.show()
+```
+
+```python
+hist1 = all_histograms_mini[:, "4j2b", :, "nominal",:,:].project("njet")
+hist2 = all_histograms_nano[:, "4j2b", :, "nominal",:,:].project("njet")
+
+print("Hist 1 Sum = ", hist1.sum())
+print("Hist 2 Sum = ", hist2.sum())
 
 main_ax_artists, sublot_ax_artists = hist1.plot_ratio(hist2, 
                                                       rp_num_label="miniAOD",

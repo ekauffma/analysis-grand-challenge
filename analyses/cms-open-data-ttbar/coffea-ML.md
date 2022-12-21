@@ -1,6 +1,7 @@
 ---
 jupyter:
   jupytext:
+    formats: ipynb,md
     text_representation:
       extension: .md
       format_name: markdown
@@ -11,46 +12,6 @@ jupyter:
     language: python
     name: python3
 ---
-
-# CMS Open Data $t\bar{t}$: from data delivery to statistical inference
-
-We are using [2015 CMS Open Data](https://cms.cern/news/first-cms-open-data-lhc-run-2-released) in this demonstration to showcase an analysis pipeline.
-It features data delivery and processing, histogram construction and visualization, as well as statistical inference.
-
-This notebook was developed in the context of the [IRIS-HEP AGC tools 2022 workshop](https://indico.cern.ch/e/agc-tools-2).
-This work was supported by the U.S. National Science Foundation (NSF) Cooperative Agreement OAC-1836650 (IRIS-HEP).
-
-This is a **technical demonstration**.
-We are including the relevant workflow aspects that physicists need in their work, but we are not focusing on making every piece of the demonstration physically meaningful.
-This concerns in particular systematic uncertainties: we capture the workflow, but the actual implementations are more complex in practice.
-If you are interested in the physics side of analyzing top pair production, check out the latest results from [ATLAS](https://twiki.cern.ch/twiki/bin/view/AtlasPublic/TopPublicResults) and [CMS](https://cms-results.web.cern.ch/cms-results/public-results/preliminary-results/)!
-If you would like to see more technical demonstrations, also check out an [ATLAS Open Data example](https://indico.cern.ch/event/1076231/contributions/4560405/) demonstrated previously.
-
-This notebook implements most of the analysis pipeline shown in the following picture, using the tools also mentioned there:
-![ecosystem visualization](utils/ecosystem.png)
-
-### Jupytext Test
-This is a test to demonstrate editing a file in a jupytext md file and updating the change in the associated notebook file. To install Jupytext via pip, the following command was run (make sure to add to path if necessary):
-```
-  pip install jupytext --user
-```
-To create the markdown file, the following command was run:
-```
-  jupytext --to md coffea-ML.ipynb
-```
-To sync the files after this edit, the following command was run:
-```
-  jupytext --update --to notebook coffea-ML.md
-```
-
-
-### Data pipelines
-
-To be a bit more precise, we are going to be looking at three different data pipelines:
-![processing pipelines](utils/processing_pipelines.png)
-
-
-### Imports: setting up our environment
 
 ```python
 import asyncio
@@ -78,44 +39,6 @@ import utils  # contains code for bookkeeping and cosmetics, as well as some boi
 logging.getLogger("cabinetry").setLevel(logging.INFO)
 ```
 
-### Configuration: number of files and data delivery path
-
-The number of files per sample set here determines the size of the dataset we are processing.
-There are 9 samples being used here, all part of the 2015 CMS Open Data release.
-They are pre-converted from miniAOD files into ntuple format, similar to nanoAODs.
-More details about the inputs can be found [here](https://github.com/iris-hep/analysis-grand-challenge/tree/main/datasets/cms-open-data-2015).
-
-The table below summarizes the amount of data processed depending on the `N_FILES_MAX_PER_SAMPLE` setting.
-
-| setting | number of files | total size |
-| --- | --- | --- |
-| `10` | 90 | 15.6 GB |
-| `100` | 850 | 150 GB |
-| `500` | 3545| 649 GB |
-| `1000` | 5864 | 1.05 TB |
-| `-1` | 22635 | 3.44 TB |
-
-The input files are all in the 100–200 MB range.
-
-Some files are also rucio-accessible (with ATLAS credentials):
-
-| dataset | number of files | total size |
-| --- | --- | --- |
-| `user.ivukotic:user.ivukotic.ttbar__nominal` | 7066 | 1.46 TB |
-| `user.ivukotic:user.ivukotic.ttbar__scaledown` | 902 | 209 GB |
-| `user.ivukotic:user.ivukotic.ttbar__scaleup` | 917 | 191 GB |
-| `user.ivukotic:user.ivukotic.ttbar__ME_var` | 438 | 103 GB |
-| `user.ivukotic:user.ivukotic.ttbar__PS_var` | 443 | 100 GB |
-| `user.ivukotic:user.ivukotic.single_top_s_chan__nominal` | 114 | 11 GB |
-| `user.ivukotic:user.ivukotic.single_top_t_chan__nominal` | 2506 | 392 GB |
-| `user.ivukotic:user.ivukotic.single_top_tW__nominal` | 50 | 9 GB |
-| `user.ivukotic:user.ivukotic.wjets__nominal` | 10199 | 1.13 TB |
-| total | 22635 | 3.61 TB |
-
-The difference in total file size is presumably due to the different storages, which report slightly different sizes.
-
-When setting the `PIPELINE` variable below to `"servicex_databinder"`, the `N_FILES_MAX_PER_SAMPLE` variable is ignored and all files are processed.
-
 ```python
 ### GLOBAL CONFIGURATION
 
@@ -137,14 +60,6 @@ SERVICEX_IGNORE_CACHE = True
 # analysis facility: set to "coffea_casa" for coffea-casa environments, "EAF" for FNAL, "local" for local setups
 AF = "coffea_casa"
 ```
-
-### Defining our `coffea` Processor
-
-The processor includes a lot of the physics analysis details:
-- event filtering and the calculation of observables,
-- event weighting,
-- calculating systematic uncertainties at the event and object level,
-- filling all the information into histograms that get aggregated and ultimately returned to us by `coffea`.
 
 ```python tags=[]
 processor_base = processor.ProcessorABC if (PIPELINE != "servicex_processor") else servicex.Analysis
@@ -343,11 +258,6 @@ class TtbarAnalysis(processor_base):
         return accumulator
 ```
 
-### AGC `coffea` schema
-
-When using `coffea`, we can benefit from the schema functionality to group columns into convenient objects.
-This schema is taken from [mat-adamec/agc_coffea](https://github.com/mat-adamec/agc_coffea).
-
 ```python tags=[]
 class AGCSchema(BaseSchema):
     def __init__(self, base_form):
@@ -382,10 +292,6 @@ class AGCSchema(BaseSchema):
         return behavior
 ```
 
-### "Fileset" construction and metadata
-
-Here, we gather all the required information about the files we want to process: paths to the files and asociated metadata.
-
 ```python tags=[]
 fileset = utils.construct_fileset(N_FILES_MAX_PER_SAMPLE, use_xcache=False)
 
@@ -393,83 +299,6 @@ print(f"processes in fileset: {list(fileset.keys())}")
 print(f"\nexample of information in fileset:\n{{\n  'files': [{fileset['ttbar__nominal']['files'][0]}, ...],")
 print(f"  'metadata': {fileset['ttbar__nominal']['metadata']}\n}}")
 ```
-
-### ServiceX-specific functionality: query setup
-
-Define the func_adl query to be used for the purpose of extracting columns and filtering.
-
-```python tags=[]
-def get_query(source: ObjectStream) -> ObjectStream:
-    """Query for event / column selection: no filter, select relevant lepton and jet columns
-    """
-    return source.Select(lambda e: {
-                                    "electron_pt": e.electron_pt,
-                                    "muon_pt": e.muon_pt,
-                                    "jet_pt": e.jet_pt,
-                                    "jet_eta": e.jet_eta,
-                                    "jet_phi": e.jet_phi,
-                                    "jet_mass": e.jet_mass,
-                                    "jet_btag": e.jet_btag,
-                                   }
-                        )
-```
-
-### Standalone ServiceX for subsequent `coffea` processing
-
-Using `servicex-databinder`, we can execute a query and download the output.
-As the files are currently accessible through `rucio` only with ATLAS credentials, you need to use an ATLAS ServiceX instance to run this (for example via the UChicago coffea-casa analysis facility).
-
-```python tags=[]
-if PIPELINE == "servicex_databinder":
-    from servicex_databinder import DataBinder
-    t0 = time.time()
-
-    # query for events with at least 4 jets with 25 GeV, at least one b-tag, and exactly one electron or muon with pT > 25 GeV
-    # returning columns required for subsequent processing
-    query_string = """Where(
-        lambda event: event.electron_pt.Where(lambda pT: pT > 25).Count() + event.muon_pt.Where(lambda pT: pT > 25).Count() == 1
-        ).Where(lambda event: event.jet_pt.Where(lambda pT: pT > 25).Count() >= 4
-        ).Where(lambda event: event.jet_btag.Where(lambda btag: btag > 0.5).Count() >= 1
-        ).Select(
-             lambda e: {"electron_pt": e.electron_pt, "muon_pt": e.muon_pt,
-                        "jet_pt": e.jet_pt, "jet_eta": e.jet_eta, "jet_phi": e.jet_phi, "jet_mass": e.jet_mass, "jet_btag": e.jet_btag}
-    )"""
-
-    sample_names = ["ttbar__nominal", "ttbar__scaledown", "ttbar__scaleup", "ttbar__ME_var", "ttbar__PS_var",
-                    "single_top_s_chan__nominal", "single_top_t_chan__nominal", "single_top_tW__nominal", "wjets__nominal"]
-    sample_names = ["single_top_s_chan__nominal"]  # for quick tests: small dataset with only 50 files
-    sample_list = []
-
-    for sample_name in sample_names:
-        sample_list.append({"Name": sample_name, "RucioDID": f"user.ivukotic:user.ivukotic.{sample_name}", "Tree": "events", "FuncADL": query_string})
-
-
-    databinder_config = {
-                            "General": {
-                                           "ServiceXBackendName": "uproot",
-                                            "OutputDirectory": "outputs_databinder",
-                                            "OutputFormat": "root",
-                                            "IgnoreServiceXCache": SERVICEX_IGNORE_CACHE
-                            },
-                            "Sample": sample_list
-                        }
-
-    sx_db = DataBinder(databinder_config)
-    out = sx_db.deliver()
-    print(f"execution took {time.time() - t0:.2f} seconds")
-
-    # update list of fileset files, pointing to ServiceX output for subsequent processing
-    # for process in fileset.keys():
-    #     if out.get(process):
-    #         fileset[process]["files"] = out[process]
-```
-
-### Execute the data delivery pipeline
-
-What happens here depends on the configuration setting for `PIPELINE`:
-- when set to `servicex_processor`, ServiceX will feed columns to `coffea` processors, which will asynchronously process them and accumulate the output histograms,
-- when set to `coffea`, processing will happen with pure `coffea`,
-- if `PIPELINE` was set to `servicex_databinder`, the input data has already been pre-processed and will be processed further with `coffea`.
 
 ```python
 t0 = time.time()
@@ -490,20 +319,7 @@ if PIPELINE == "coffea":
     all_labels = all_histograms["labels"]
     all_histograms = all_histograms["hist"]
 
-elif PIPELINE == "servicex_processor":
-    # in a notebook:
-    all_histograms = await utils.produce_all_histograms(fileset, get_query, TtbarAnalysis, use_dask=USE_DASK, ignore_cache=SERVICEX_IGNORE_CACHE)
 
-    # as a script:
-    # async def produce_all_the_histograms():
-    #    return await utils.produce_all_histograms(fileset, get_query, TtbarAnalysis, use_dask=USE_DASK, ignore_cache=SERVICEX_IGNORE_CACHE)
-    #
-    # all_histograms = asyncio.run(produce_all_the_histograms())
-
-elif PIPELINE == "servicex_databinder":
-    # needs a slightly different schema, not currently implemented
-    raise NotImplementedError("further processing of this method is not currently implemented")
-    
 print(f"\nexecution took {time.time() - t0:.2f} seconds")
 ```
 
@@ -547,11 +363,6 @@ for max_depth in max_depth_vals:
 
     print("max_depth = ", max_depth, ", Efficiency = ", 100*score, "%")
 ```
-
-### Inspecting the produced histograms
-
-Let's have a look at the data we obtained.
-We built histograms in two phase space regions, for multiple physics processes and systematic variations.
 
 ```python
 all_histograms.axes
@@ -620,115 +431,3 @@ plt.legend(frameon=False)
 plt.title(">= 4 jets, >= 2 b-tags")
 plt.xlabel("$m_{bjj}$ [Gev]");
 ```
-
-Our top reconstruction approach ($bjj$ system with largest $p_T$) has worked!
-
-Let's also have a look at some systematic variations:
-- b-tagging, which we implemented as jet-kinematic dependent event weights,
-- jet energy variations, which vary jet kinematics, resulting in acceptance effects and observable changes.
-
-We are making of [UHI](https://uhi.readthedocs.io/) here to re-bin.
-
-```python
-# b-tagging variations
-all_histograms[120j::hist.rebin(2), "4j1b", "ttbar", "nominal"].plot(label="nominal", linewidth=2)
-all_histograms[120j::hist.rebin(2), "4j1b", "ttbar", "btag_var_0_up"].plot(label="NP 1", linewidth=2)
-all_histograms[120j::hist.rebin(2), "4j1b", "ttbar", "btag_var_1_up"].plot(label="NP 2", linewidth=2)
-all_histograms[120j::hist.rebin(2), "4j1b", "ttbar", "btag_var_2_up"].plot(label="NP 3", linewidth=2)
-all_histograms[120j::hist.rebin(2), "4j1b", "ttbar", "btag_var_3_up"].plot(label="NP 4", linewidth=2)
-plt.legend(frameon=False)
-plt.xlabel("HT [GeV]")
-plt.title("b-tagging variations");
-```
-
-```python
-# jet energy scale variations
-all_histograms[:, "4j2b", "ttbar", "nominal"].plot(label="nominal", linewidth=2)
-all_histograms[:, "4j2b", "ttbar", "pt_scale_up"].plot(label="scale up", linewidth=2)
-all_histograms[:, "4j2b", "ttbar", "pt_res_up"].plot(label="resolution up", linewidth=2)
-plt.legend(frameon=False)
-plt.xlabel("$m_{bjj}$ [Gev]")
-plt.title("Jet energy variations");
-```
-
-### Save histograms to disk
-
-We'll save everything to disk for subsequent usage.
-This also builds pseudo-data by combining events from the various simulation setups we have processed.
-
-```python
-utils.save_histograms(all_histograms, fileset, "histograms.root")
-```
-
-### Statistical inference
-
-A statistical model has been defined in `config.yml`, ready to be used with our output.
-We will use `cabinetry` to combine all histograms into a `pyhf` workspace and fit the resulting statistical model to the pseudodata we built.
-
-```python
-config = cabinetry.configuration.load("cabinetry_config.yml")
-cabinetry.templates.collect(config)
-cabinetry.templates.postprocess(config)  # optional post-processing (e.g. smoothing)
-ws = cabinetry.workspace.build(config)
-cabinetry.workspace.save(ws, "workspace.json")
-```
-
-We can inspect the workspace with `pyhf`, or use `pyhf` to perform inference.
-
-```python
-!pyhf inspect workspace.json | head -n 20
-```
-
-Let's try out what we built: the next cell will perform a maximum likelihood fit of our statistical model to the pseudodata we built.
-
-```python
-model, data = cabinetry.model_utils.model_and_data(ws)
-fit_results = cabinetry.fit.fit(model, data)
-
-cabinetry.visualize.pulls(
-    fit_results, exclude="ttbar_norm", close_figure=True, save_figure=False
-)
-```
-
-For this pseudodata, what is the resulting ttbar cross-section divided by the Standard Model prediction?
-
-```python
-poi_index = model.config.poi_index
-print(f"\nfit result for ttbar_norm: {fit_results.bestfit[poi_index]:.3f} +/- {fit_results.uncertainty[poi_index]:.3f}")
-```
-
-Let's also visualize the model before and after the fit, in both the regions we are using.
-The binning here corresponds to the binning used for the fit.
-
-```python
-model_prediction = cabinetry.model_utils.prediction(model)
-figs = cabinetry.visualize.data_mc(model_prediction, data, close_figure=True)
-figs[0]["figure"]
-```
-
-```python
-figs[1]["figure"]
-```
-
-We can see very good post-fit agreement.
-
-```python
-model_prediction_postfit = cabinetry.model_utils.prediction(model, fit_results=fit_results)
-figs = cabinetry.visualize.data_mc(model_prediction_postfit, data, close_figure=True)
-figs[0]["figure"]
-```
-
-```python
-figs[1]["figure"]
-```
-
-### What is next?
-
-Our next goals for this pipeline demonstration are:
-- making this analysis even **more feature-complete**,
-- **addressing performance bottlenecks** revealed by this demonstrator,
-- **collaborating** with you!
-
-Please do not hesitate to get in touch if you would like to join the effort, or are interested in re-implementing (pieces of) the pipeline with different tools!
-
-Our mailing list is analysis-grand-challenge@iris-hep.org, sign up via the [Google group](https://groups.google.com/a/iris-hep.org/g/analysis-grand-challenge).

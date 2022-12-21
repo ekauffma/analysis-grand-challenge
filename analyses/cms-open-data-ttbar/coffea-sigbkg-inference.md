@@ -134,7 +134,7 @@ N_FILES_MAX_PER_SAMPLE = 3
 PIPELINE = "coffea"
 
 # enable Dask (may not work yet in combination with ServiceX outside of coffea-casa)
-USE_DASK = False
+# USE_DASK = False
 USE_DASK = True
 
 # ServiceX behavior: ignore cache with repeated queries
@@ -173,6 +173,10 @@ The processor includes a lot of the physics analysis details:
 - event weighting,
 - calculating systematic uncertainties at the event and object level,
 - filling all the information into histograms that get aggregated and ultimately returned to us by `coffea`.
+
+```python
+
+```
 
 ```python tags=[]
 processor_base = processor.ProcessorABC if (PIPELINE != "servicex_processor") else servicex.Analysis
@@ -640,10 +644,6 @@ elif PIPELINE == "servicex_databinder":
     raise NotImplementedError("further processing of this method is not currently implemented")
 
 print(f"\nexecution took {exec_time:.2f} seconds")
-```
-
-```python
-all_histograms['hist']
 ```
 
 ## Plots for Sig/Bkg Classification in 4j1b Region

@@ -11,6 +11,9 @@ from func_adl import ObjectStream
 from coffea.processor import servicex
 from servicex import ServiceXDataset
 
+import particle
+from anytree import NodeMixin, RenderTree, Node
+
 
 def get_client(af="coffea_casa"):
     if af == "coffea_casa":
@@ -51,7 +54,7 @@ def set_style():
     plt.rcParams['text.color'] = "222222"
 
 
-def construct_fileset(n_files_max_per_sample, use_xcache=False, af_name=""):
+def construct_fileset(n_files_max_per_sample, use_xcache=False, af_name="", json_file='ntuples_merged.json'):
     # using https://atlas-groupdata.web.cern.ch/atlas-groupdata/dev/AnalysisTop/TopDataPreparation/XSection-MC15-13TeV.data
     # for reference
     # x-secs are in pb
@@ -65,19 +68,22 @@ def construct_fileset(n_files_max_per_sample, use_xcache=False, af_name=""):
     }
 
     # list of files
-    with open("ntuples_merged.json") as f:
+    with open(json_file) as f:
         file_info = json.load(f)
 
     # process into "fileset" summarizing all info
     fileset = {}
     for process in file_info.keys():
+        print("process = ", process)
         if process == "data":
             continue  # skip data
 
         for variation in file_info[process].keys():
+            print("variation = ", variation)
             file_list = file_info[process][variation]["files"]
             if n_files_max_per_sample != -1:
-                file_list = file_list[:n_files_max_per_sample]  # use partial set of samples
+                if len(file_list)>0:
+                    file_list = file_list[:n_files_max_per_sample]  # use partial set of samples
 
             file_paths = [f["path"] for f in file_list]
             if use_xcache:
@@ -85,7 +91,9 @@ def construct_fileset(n_files_max_per_sample, use_xcache=False, af_name=""):
             if af_name == "ssl-dev":
                 # point to local files on /data
                 file_paths = [f.replace("https://xrootd-local.unl.edu:1094//store/user/", "/data/alheld/") for f in file_paths]
-            nevts_total = sum([f["nevts"] for f in file_list])
+            if len(file_list)>0:
+                nevts_total = sum([f["nevts"] for f in file_list])
+            else: nevts_total = 0
             metadata = {"process": process, "variation": variation, "nevts": nevts_total, "xsec": xsec_info[process]}
             fileset.update({f"{process}__{variation}": {"files": file_paths, "metadata": metadata}})
 
@@ -178,3 +186,69 @@ async def produce_all_histograms(fileset, query, analysis_processor, use_dask=Fa
     all_histograms = sum([h["hist"] for h in all_histogram_dicts])
 
     return all_histograms
+
+
+class GenPartNode(NodeMixin):
+    def __init__(self, name, genPart, parent=None, children=None):
+        super(GenPartNode, self).__init__()
+        self.name = name
+        self.genPart = genPart
+        self.parent = parent
+        if children:
+            self.children = children
+            
+
+def printTrees(particles):
+    
+    origins = []
+    for genpart in particles:
+        if genpart.genPartIdxMother==-1:
+            
+            # create origin node
+            origin = GenPartNode(particle.Particle.from_pdgid(genpart.pdgId).name, genpart)
+            origins.append(origin)
+
+            # initialize lists/queues to keep track
+            queue_node = []
+            visited_genpart = []
+            queue_genpart = []
+
+            # add origin particle/node to queue/visited
+            queue_node.append(origin)
+            visited_genpart.append((genpart.pdgId,genpart.pt,genpart.eta,genpart.phi))
+            queue_genpart.append(genpart)
+            
+            # loop through queue
+            while queue_genpart:
+            
+                # grab top elements from queue
+                g = queue_genpart.pop(0)
+                n = queue_node.pop(0)
+
+                # iterate through daughters
+                for daughter in g.children:
+
+                    # (should be) unique id for particle
+                    daughter_tuple = (daughter.pdgId,daughter.pt,daughter.eta,daughter.phi)
+
+                    # if we have not visited particle yet
+                    if daughter_tuple not in visited_genpart:
+                        
+                        # add to queue
+                        visited_genpart.append(daughter_tuple)
+                        queue_genpart.append(daughter)
+
+                        # create new node
+                        node =  GenPartNode(particle.Particle.from_pdgid(daughter.pdgId).name, 
+                                            daughter,
+                                            parent = n)
+                        
+                        queue_node.append(node)
+                                
+        
+    # printing trees
+    for origin in origins:
+        for pre, fill, node in RenderTree(origin):
+            print("%s%s" % (pre, node.name))
+            
+    return

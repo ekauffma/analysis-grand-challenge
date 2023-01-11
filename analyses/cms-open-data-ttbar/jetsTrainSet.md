@@ -42,7 +42,7 @@ logging.getLogger("cabinetry").setLevel(logging.INFO)
 ```
 
 ```python
-N_FILES_MAX_PER_SAMPLE = 3
+N_FILES_MAX_PER_SAMPLE = 10
 NUM_CORES = 16
 CHUNKSIZE = 500_000
 IO_FILE_PERCENT = 4
@@ -329,17 +329,21 @@ from itertools import combinations
 ```
 
 ```python
-mass_other = []
-mass_same = []
+mass_tW = []
+mass_tt = []
+mass_WW = []
 
-deltar_other = []
-deltar_same = []
+deltar_tW = []
+deltar_tt = []
+deltar_WW = []
 
-deltaphi_other = []
-deltaphi_same = []
+deltaphi_tW = []
+deltaphi_tt = []
+deltaphi_WW = []
 
-deltaeta_other = []
-deltaeta_same = []
+deltaeta_tW = []
+deltaeta_tt = []
+deltaeta_WW = []
 
 for event in range(features.shape[0]):
     labels_permutations = np.array(list(combinations(labels[0,:],2)))
@@ -347,20 +351,27 @@ for event in range(features.shape[0]):
                                    in combinations(enumerate(labels[0,:]), 2)))
     sum_permutations = np.array([sum(labels_permutations[i,:]) for i in range(6)])
     
-    valid_inds = np.array(labels_indices)[sum_permutations==2]
-    invalid_inds = np.array(labels_indices)[sum_permutations!=2]
+    tW_inds = np.array(labels_indices)[sum_permutations==1]
+    tt_inds = np.array(labels_indices)[sum_permutations==0]
+    WW_inds = np.array(labels_indices)[sum_permutations==2]
     
-    for i in valid_inds:
-        mass_other.append(features[event,i[0],i[1]])
-        deltar_other.append(features[event,i[0],i[1]+4])
-        deltaphi_other.append(features[event,i[0],i[1]+8])
-        deltaeta_other.append(features[event,i[0],i[1]+12])
+    for i in tW_inds:
+        mass_tW.append(features[event,i[0],i[1]])
+        deltar_tW.append(features[event,i[0],i[1]+4])
+        deltaphi_tW.append(features[event,i[0],i[1]+8])
+        deltaeta_tW.append(features[event,i[0],i[1]+12])
         
-    for i in invalid_inds:
-        mass_same.append(features[event,i[0],i[1]])
-        deltar_same.append(features[event,i[0],i[1]+4])
-        deltaphi_same.append(features[event,i[0],i[1]+8])
-        deltaeta_same.append(features[event,i[0],i[1]+12])
+    for i in tt_inds:
+        mass_tt.append(features[event,i[0],i[1]])
+        deltar_tt.append(features[event,i[0],i[1]+4])
+        deltaphi_tt.append(features[event,i[0],i[1]+8])
+        deltaeta_tt.append(features[event,i[0],i[1]+12])
+        
+    for i in WW_inds:
+        mass_WW.append(features[event,i[0],i[1]])
+        deltar_WW.append(features[event,i[0],i[1]+4])
+        deltaphi_WW.append(features[event,i[0],i[1]+8])
+        deltaeta_WW.append(features[event,i[0],i[1]+12])
 ```
 
 ```python
@@ -369,30 +380,35 @@ import matplotlib.pyplot as plt
 
 ```python
 bins = np.linspace(0,800,200)
-plt.hist(mass_other,histtype='step',bins=bins,density=True)
-plt.hist(mass_same,histtype='step',bins=bins,density=True)
-plt.legend(["t-W jet pairs", "other"])
+plt.hist(mass_tW,histtype='step',bins=bins,density=True)
+plt.hist(mass_tt,histtype='step',bins=bins,density=True)
+plt.hist(mass_WW,histtype='step',bins=bins,density=True)
+plt.legend(["t-W", "t-t", "W-W"])
 plt.xlabel("combined mass [GeV]")
+plt.xlim([0,300])
 plt.show()
 
 bins = np.linspace(0,10,150)
-plt.hist(deltar_other,histtype='step',bins=bins,density=True)
-plt.hist(deltar_same,histtype='step',bins=bins,density=True)
-plt.legend(["t-W jet pairs", "other"])
+plt.hist(deltar_tW,histtype='step',bins=bins,density=True)
+plt.hist(deltar_tt,histtype='step',bins=bins,density=True)
+plt.hist(deltar_WW,histtype='step',bins=bins,density=True)
+plt.legend(["t-W", "t-t", "W-W"])
 plt.xlabel("$\Delta R$")
 plt.show()
 
 bins = np.linspace(0,6.3,100)
-plt.hist(deltaphi_other,histtype='step',bins=bins,density=True)
-plt.hist(deltaphi_same,histtype='step',bins=bins,density=True)
-plt.legend(["t-W jet pairs", "other"])
+plt.hist(deltaphi_tW,histtype='step',bins=bins,density=True)
+plt.hist(deltaphi_tt,histtype='step',bins=bins,density=True)
+plt.hist(deltaphi_WW,histtype='step',bins=bins,density=True)
+plt.legend(["t-W", "t-t", "W-W"])
 plt.xlabel("$\Delta \phi$")
 plt.show()
 
 bins = np.linspace(0,6.3,100)
-plt.hist(deltaeta_other,histtype='step',bins=bins,density=True)
-plt.hist(deltaeta_same,histtype='step',bins=bins,density=True)
-plt.legend(["t-W jet pairs", "other"])
+plt.hist(deltaeta_tW,histtype='step',bins=bins,density=True)
+plt.hist(deltaeta_tt,histtype='step',bins=bins,density=True)
+plt.hist(deltaeta_WW,histtype='step',bins=bins,density=True)
+plt.legend(["t-W", "t-t", "W-W"])
 plt.xlabel("$\Delta \eta$")
 plt.show()
 ```
@@ -445,10 +461,6 @@ plt.show()
 ```
 
 ```python
-np.pi
-```
-
-```python
 deltaphi_lepton_wjet = features_flat[:,20][labels_flat==1]
 deltaphi_lepton_tjet = features_flat[:,20][labels_flat==0]
 
@@ -491,18 +503,9 @@ plt.legend(["W jet", "t jet"])
 plt.xlabel("Number of Constituents")
 plt.show()
 
-btag_wjet = features_flat[:,24][labels_flat==1]
-btag_tjet = features_flat[:,24][labels_flat==0]
 
-bins = np.linspace(0,1,50)
-plt.hist(btag_wjet,histtype='step',bins=bins,density=True)
-plt.hist(btag_tjet,histtype='step',bins=bins,density=True)
-plt.legend(["W jet", "t jet"])
-plt.xlabel("Jet b-tag")
-plt.show()
-
-area_wjet = features_flat[:,25][labels_flat==1]
-area_tjet = features_flat[:,25][labels_flat==0]
+area_wjet = features_flat[:,24][labels_flat==1]
+area_tjet = features_flat[:,24][labels_flat==0]
 
 bins = np.linspace(0.2,0.8,50)
 plt.hist(area_wjet,histtype='step',bins=bins,density=True)

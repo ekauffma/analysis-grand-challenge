@@ -74,12 +74,12 @@ def construct_fileset(n_files_max_per_sample, use_xcache=False, af_name="", json
     # process into "fileset" summarizing all info
     fileset = {}
     for process in file_info.keys():
-        print("process = ", process)
+        # print("process = ", process)
         if process == "data":
             continue  # skip data
 
         for variation in file_info[process].keys():
-            print("variation = ", variation)
+            # print("variation = ", variation)
             file_list = file_info[process][variation]["files"]
             if n_files_max_per_sample != -1:
                 if len(file_list)>0:

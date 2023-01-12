@@ -42,7 +42,7 @@ logging.getLogger("cabinetry").setLevel(logging.INFO)
 ```
 
 ```python
-N_FILES_MAX_PER_SAMPLE = 1
+N_FILES_MAX_PER_SAMPLE = 10
 NUM_CORES = 16
 CHUNKSIZE = 500_000
 IO_FILE_PERCENT = 4
@@ -201,14 +201,21 @@ def get_training_set(jets, electrons, muons, labels):
     
     # which combination does the truth label correspond to?
     which_combination = np.zeros(len(jets), dtype=int)
+    # no correct matches
+    which_anti_combination = np.zeros(labels.shape[0], dtype=int)
     for i in range(12):
         which_combination[(labels[:]==permutation_labels[i,:]).all(1)] = i
+        which_anti_combination[np.invert((labels[:]==permutation_labels[i,:]).any(1))] = i
 
-    # convert to combination-level truth label (0 or 1)
+    # convert to combination-level truth label (-1, 0 or 1)
     which_combination = list(zip(range(len(jets),), which_combination))
+    which_anti_combination = list(zip(range(labels.shape[0],), which_anti_combination))
+    
     truth_labels = np.zeros((len(jets),12))
     for i,tpl in enumerate(which_combination):
         truth_labels[tpl]=1
+    for i,tpl in enumerate(which_anti_combination):
+        truth_labels[tpl]=-1
         
         
     #### flatten to combinations (easy to unflatten since each event always has 12 combinations) ####
@@ -307,11 +314,7 @@ for key in fileset_keys:
 ```
 
 ```python
-fileset = {'ttbar__nominal': {'files': ['https://xrootd-local.unl.edu:1094//store/user/AGC/nanoAOD/TT_TuneCUETP8M1_13TeV-powheg-pythia8/cmsopendata2015_ttbar_19980_PU25nsData2015v1_76X_mcRun2_asymptotic_v12_ext3-v1_00000_0001.root'],
-  'metadata': {'process': 'ttbar',
-   'variation': 'nominal',
-   'nevts': 1334428,
-   'xsec': 729.84}}}
+fileset
 ```
 
 ```python
@@ -343,13 +346,9 @@ print(labels.shape)
 ```
 
 ```python
-signal = features[labels==1,:]
-background = features[labels==0,:]
-```
-
-```python
-print(signal.shape)
-print(background.shape)
+all_correct = features[labels==1,:]
+some_correct = features[labels==0,:]
+none_correct = features[labels==-1,:]
 ```
 
 ```python
@@ -360,23 +359,25 @@ import matplotlib.pyplot as plt
 #### delta R plots ####
 
 bins = np.linspace(0,8,100)
-plt.hist(signal[:,0], histtype='step', bins=bins, density=True)
-plt.hist(background[:,0], histtype='step', bins=bins, density=True)
-plt.legend(["Correct Combination", "Incorrect Combination"])
+legend_list = ["All Matches Correct", "Some Matches Correct", "No Matches Correct"]
+plt.hist(all_correct[:,0], histtype='step', bins=bins, density=True)
+plt.hist(some_correct[:,0], histtype='step', bins=bins, density=True)
+plt.hist(none_correct[:,0], histtype='step', bins=bins, density=True)
+plt.legend(legend_list)
 plt.xlabel("$\Delta R$ between top1 jet and lepton")
 plt.show()
 
-bins = np.linspace(0,8,100)
-plt.hist(signal[:,1], histtype='step', bins=bins, density=True)
-plt.hist(background[:,1], histtype='step', bins=bins, density=True)
-plt.legend(["Correct Combination", "Incorrect Combination"])
+plt.hist(all_correct[:,1], histtype='step', bins=bins, density=True)
+plt.hist(some_correct[:,1], histtype='step', bins=bins, density=True)
+plt.hist(none_correct[:,1], histtype='step', bins=bins, density=True)
+plt.legend(legend_list)
 plt.xlabel("$\Delta R$ between the two W jets")
 plt.show()
 
-bins = np.linspace(0,8,100)
-plt.hist(np.concatenate((signal[:,2],signal[:,3])), histtype='step', bins=bins, density=True)
-plt.hist(np.concatenate((background[:,2],background[:,3])), histtype='step', bins=bins, density=True)
-plt.legend(["Correct Combination", "Incorrect Combination"])
+plt.hist(np.concatenate((all_correct[:,2],all_correct[:,3])), histtype='step', bins=bins, density=True)
+plt.hist(np.concatenate((some_correct[:,2],some_correct[:,3])), histtype='step', bins=bins, density=True)
+plt.hist(np.concatenate((none_correct[:,2],none_correct[:,3])), histtype='step', bins=bins, density=True)
+plt.legend(legend_list)
 plt.xlabel("$\Delta R$ between W jet and top2 jet")
 plt.show()
 ```
@@ -385,98 +386,115 @@ plt.show()
 #### delta phi plots ####
 
 bins = np.linspace(0,2*np.pi,100)
-plt.hist(signal[:,4], histtype='step', bins=bins, density=True)
-plt.hist(background[:,4], histtype='step', bins=bins, density=True)
-plt.legend(["Correct Combination", "Incorrect Combination"])
+legend_list = ["All Matches Correct", "Some Matches Correct", "No Matches Correct"]
+
+plt.hist(all_correct[:,4], histtype='step', bins=bins, density=True)
+plt.hist(some_correct[:,4], histtype='step', bins=bins, density=True)
+plt.hist(none_correct[:,4], histtype='step', bins=bins, density=True)
+plt.legend(legend_list)
 plt.xlabel("$\Delta\phi$ between top1 jet and lepton")
 plt.show()
 
-bins = np.linspace(0,2*np.pi,100)
-plt.hist(signal[:,5], histtype='step', bins=bins, density=True)
-plt.hist(background[:,5], histtype='step', bins=bins, density=True)
-plt.legend(["Correct Combination", "Incorrect Combination"])
+plt.hist(all_correct[:,5], histtype='step', bins=bins, density=True)
+plt.hist(some_correct[:,5], histtype='step', bins=bins, density=True)
+plt.hist(none_correct[:,5], histtype='step', bins=bins, density=True)
+plt.legend(legend_list)
 plt.xlabel("$\Delta\phi$ between the two W jets")
 plt.show()
 
-bins = np.linspace(0,2*np.pi,100)
-plt.hist(np.concatenate((signal[:,6],signal[:,7])), histtype='step', bins=bins, density=True)
-plt.hist(np.concatenate((background[:,6],background[:,7])), histtype='step', bins=bins, density=True)
-plt.legend(["Correct Combination", "Incorrect Combination"])
+plt.hist(np.concatenate((all_correct[:,6],all_correct[:,7])), histtype='step', bins=bins, density=True)
+plt.hist(np.concatenate((some_correct[:,6],some_correct[:,7])), histtype='step', bins=bins, density=True)
+plt.hist(np.concatenate((none_correct[:,6],none_correct[:,7])), histtype='step', bins=bins, density=True)
+plt.legend(legend_list)
 plt.xlabel("$\Delta\phi$ between W jet and top2 jet")
 plt.show()
 ```
 
 ```python
 #### mass plots ####
+legend_list = ["All Matches Correct", "Some Matches Correct", "No Matches Correct"]
 
 bins = np.linspace(0,30,100)
-plt.hist(signal[:,8], histtype='step', bins=bins, density=True)
-plt.hist(background[:,8], histtype='step', bins=bins, density=True)
-plt.legend(["Correct Combination", "Incorrect Combination"])
+plt.hist(all_correct[:,8], histtype='step', bins=bins, density=True)
+plt.hist(some_correct[:,8], histtype='step', bins=bins, density=True)
+plt.hist(none_correct[:,8], histtype='step', bins=bins, density=True)
+plt.legend(legend_list)
 plt.xlabel("Combined mass of top1 jet and lepton [GeV]")
 plt.show()
 
 bins = np.linspace(5,70,100)
-plt.hist(signal[:,9], histtype='step', bins=bins, density=True)
-plt.hist(background[:,9], histtype='step', bins=bins, density=True)
-plt.legend(["Correct Combination", "Incorrect Combination"])
+plt.hist(all_correct[:,9], histtype='step', bins=bins, density=True)
+plt.hist(some_correct[:,9], histtype='step', bins=bins, density=True)
+plt.hist(none_correct[:,9], histtype='step', bins=bins, density=True)
+plt.legend(legend_list)
 plt.xlabel("Combined mass of the two W jets [GeV]")
 plt.show()
 
 bins = np.linspace(10,100,100)
-plt.hist(signal[:,10], histtype='step', bins=bins, density=True)
-plt.hist(background[:,10], histtype='step', bins=bins, density=True)
-plt.legend(["Correct Combination", "Incorrect Combination"])
+plt.hist(all_correct[:,10], histtype='step', bins=bins, density=True)
+plt.hist(some_correct[:,10], histtype='step', bins=bins, density=True)
+plt.hist(none_correct[:,10], histtype='step', bins=bins, density=True)
+plt.legend(legend_list)
 plt.xlabel("Combined mass of W jets and top2 jet [GeV]")
 plt.show()
 ```
 
 ```python
 #### pT plots ####
-
+legend_list = ["All Matches Correct", "Some Matches Correct", "No Matches Correct"]
 bins = np.linspace(25,300,100)
-plt.hist(np.concatenate((signal[:,11],signal[:,12])), histtype='step', bins=bins, density=True)
-plt.hist(np.concatenate((background[:,11],background[:,12])), histtype='step', bins=bins, density=True)
-plt.legend(["Correctly Labeled W Jet", "Other"])
-plt.xlabel("Jet $p_T$ [GeV]")
+
+plt.hist(np.concatenate((all_correct[:,11],all_correct[:,12])), histtype='step', bins=bins, density=True)
+plt.hist(np.concatenate((some_correct[:,11],some_correct[:,12])), histtype='step', bins=bins, density=True)
+plt.hist(np.concatenate((none_correct[:,11],none_correct[:,12])), histtype='step', bins=bins, density=True)
+plt.legend(legend_list)
+plt.xlabel("Jet $p_T$ (W) [GeV]")
 plt.show()
 
-bins = np.linspace(25,300,100)
-plt.hist(signal[:,13], histtype='step', bins=bins, density=True)
-plt.hist(background[:,13], histtype='step', bins=bins, density=True)
-plt.legend(["Correctly Labeled top2 Jet", "Other"])
-plt.xlabel("Jet $p_T$ [GeV]")
+plt.hist(all_correct[:,13], histtype='step', bins=bins, density=True)
+plt.hist(some_correct[:,13], histtype='step', bins=bins, density=True)
+plt.hist(none_correct[:,13], histtype='step', bins=bins, density=True)
+plt.legend(legend_list)
+plt.xlabel("Jet $p_T$ (top2) [GeV]")
 plt.show()
 
-bins = np.linspace(25,300,100)
-plt.hist(signal[:,14], histtype='step', bins=bins, density=True)
-plt.hist(background[:,14], histtype='step', bins=bins, density=True)
-plt.legend(["Correctly Labeled top1 Jet", "Other"])
-plt.xlabel("Jet $p_T$ [GeV]")
+plt.hist(all_correct[:,14], histtype='step', bins=bins, density=True)
+plt.hist(some_correct[:,14], histtype='step', bins=bins, density=True)
+plt.hist(none_correct[:,14], histtype='step', bins=bins, density=True)
+plt.legend(legend_list)
+plt.xlabel("Jet $p_T$ (top1) [GeV]")
 plt.show()
 ```
 
 ```python
 #### jet mass plots ####
+legend_list = ["All Matches Correct", "Some Matches Correct", "No Matches Correct"]
 
 bins = np.linspace(0,50,100)
-plt.hist(np.concatenate((signal[:,15],signal[:,16])), histtype='step', bins=bins, density=True)
-plt.hist(np.concatenate((background[:,15],background[:,16])), histtype='step', bins=bins, density=True)
-plt.legend(["Correctly Labeled W Jet", "Other"])
-plt.xlabel("Jet Mass [GeV]")
+plt.hist(np.concatenate((all_correct[:,15],all_correct[:,16])), histtype='step', bins=bins, density=True)
+plt.hist(np.concatenate((some_correct[:,15],some_correct[:,16])), histtype='step', bins=bins, density=True)
+plt.hist(np.concatenate((none_correct[:,15],none_correct[:,16])), histtype='step', bins=bins, density=True)
+plt.legend(legend_list)
+plt.xlabel("Jet Mass (W) [GeV]")
 plt.show()
 
 bins = np.linspace(0,50,100)
-plt.hist(signal[:,17], histtype='step', bins=bins, density=True)
-plt.hist(background[:,17], histtype='step', bins=bins, density=True)
-plt.legend(["Correctly Labeled top2 Jet", "Other"])
-plt.xlabel("Jet Mass [GeV]")
+plt.hist(all_correct[:,17], histtype='step', bins=bins, density=True)
+plt.hist(some_correct[:,17], histtype='step', bins=bins, density=True)
+plt.hist(none_correct[:,17], histtype='step', bins=bins, density=True)
+plt.legend(legend_list)
+plt.xlabel("Jet Mass (top2) [GeV]")
 plt.show()
 
 bins = np.linspace(0,50,100)
-plt.hist(signal[:,18], histtype='step', bins=bins, density=True)
-plt.hist(background[:,18], histtype='step', bins=bins, density=True)
-plt.legend(["Correctly Labeled top1 Jet", "Other"])
-plt.xlabel("Jet Mass [GeV]")
+plt.hist(all_correct[:,18], histtype='step', bins=bins, density=True)
+plt.hist(some_correct[:,18], histtype='step', bins=bins, density=True)
+plt.hist(none_correct[:,18], histtype='step', bins=bins, density=True)
+plt.legend(legend_list)
+plt.xlabel("Jet Mass (top1) [GeV]")
 plt.show()
+```
+
+```python
+
 ```

@@ -496,10 +496,12 @@ plt.xlabel("Jet Mass (top1) [GeV]")
 plt.show()
 ```
 
-# Training
+# Model Optimization
 
 ```python
 import xgboost as xgb
+from hyperopt import hp, STATUS_OK, fmin, tpe, Trials
+from hyperopt.pyll.base import scope
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import PowerTransformer
 from sklearn.metrics import (
@@ -545,16 +547,80 @@ features_test = power.transform(features_test)
 ```
 
 ```python
-# define model parameters
-params = {'max_depth': 20,
-          'n_estimators': 100,
-          'learning_rate': 0.01,
-          'booster': 'gbtree',
-          'random_state': RANDOM_SEED,
-         }
+# hyperopt trial values
+trial_params = {
+    'max_depth': scope.int(hp.quniform('max_depth', 2, 20, 1)),
+    'n_estimators': scope.int(hp.uniform('n_estimators', 50, 700)),
+    'learning_rate': hp.loguniform('learning_rate', -5, 0),
+    'min_child_weight': hp.loguniform('min_child_weight', -1, 7),
+    'reg_alpha': hp.loguniform('reg_alpha', -10, 10),
+    'reg_lambda': hp.loguniform('reg_lambda', -10, 10),
+    'gamma': hp.loguniform('gamma', -10, 10),
+    'booster': 'gbtree',
+    'random_state': RANDOM_SEED,
+    'eval_metric': 'auc',
+               }
+```
 
+```python
+# training method for hyperopt
+def train_and_evaluate(params):
+    model = xgb.XGBClassifier(**params) # define model with current parameters
+    model = model.fit(features_train, labels_train) # train model
+
+    # predicting train set and validation set
+    train_predicted = model.predict(features_train)
+    train_predicted_prob = model.predict_proba(features_train)[:, 1]
+    val_predicted = model.predict(features_val)
+    val_predicted_prob = model.predict_proba(features_val)[:, 1]
+
+    # model metrics to track
+    metric_names = ['accuracy', 'precision', 'recall', 'f1', 'aucroc']
+        
+    # Training evaluation metrics
+    train_metrics = {
+        'Accuracy': accuracy_score(labels_train, train_predicted), 
+        'Precision': precision_score(labels_train, train_predicted, zero_division=0), 
+        'Recall': recall_score(labels_train, train_predicted), 
+        'F1': f1_score(labels_train, train_predicted), 
+        'AUCROC': roc_auc_score(labels_train, train_predicted_prob),
+    }
+    train_metrics_values = list(train_metrics.values())
+    
+    # Validation evaluation metrics
+    val_metrics = {
+        'Accuracy': accuracy_score(labels_val, val_predicted), 
+        'Precision': precision_score(labels_val, val_predicted, zero_division=0), 
+        'Recall': recall_score(labels_val, val_predicted), 
+        'F1': f1_score(labels_val, val_predicted), 
+        'AUCROC': roc_auc_score(labels_val, val_predicted_prob),
+    }
+    val_metrics_values = list(val_metrics.values())
+
+    return {'status': STATUS_OK, 'loss': -1*val_metrics['AUCROC']}
+```
+
+```python
+trials = Trials()
+
+# optimize model
+best_parameters = fmin(fn=train_and_evaluate, 
+                       space=trial_params, 
+                       algo=tpe.suggest,
+                       trials=trials,
+                       max_evals=50)
+```
+
+```python
+best_parameters['max_depth'] = int(best_parameters['max_depth'])
+best_parameters['n_estimators'] = int(best_parameters['n_estimators'])
+```
+
+# Training/Evaluation with Optimized Model
+
+```python
 # define and fit model to data
-model = xgb.XGBClassifier(**params)
+model = xgb.XGBClassifier(**best_parameters)
 model = model.fit(features_train, labels_train)
 ```
 

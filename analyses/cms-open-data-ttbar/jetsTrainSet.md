@@ -42,7 +42,7 @@ logging.getLogger("cabinetry").setLevel(logging.INFO)
 ```
 
 ```python
-N_FILES_MAX_PER_SAMPLE = 10
+N_FILES_MAX_PER_SAMPLE = 1
 NUM_CORES = 16
 CHUNKSIZE = 500_000
 IO_FILE_PERCENT = 4
@@ -73,147 +73,149 @@ def jet_pt_resolution(pt):
 
 ```python
 def training_filter(jets, electrons, muons, genparts):
-    ## filter genParticles to "matchable" particles
-    # make sure parent is not None
+    #### filter genPart to valid matching candidates ####
+
+    # get rid of particles without parents
     genpart_parent = genparts.distinctParent
     genpart_filter = np.invert(ak.is_none(genpart_parent, axis=1))
-    genpart_reduced = genparts[genpart_filter]
-    genpart_parent_reduced = genpart_reduced.distinctParent
+    genparts = genparts[genpart_filter]
+    genpart_parent = genparts.distinctParent
 
-    # parent must be top quark or W boson
-    genpart_filter2 = ((np.abs(genpart_parent_reduced.pdgId)==6) | 
-                       (np.abs(genpart_parent_reduced.pdgId)==24))
-    genpart_reduced = genpart_reduced[genpart_filter2]
+    # ensure that parents are top quark or W
+    genpart_filter2 = ((np.abs(genpart_parent.pdgId)==6) | (np.abs(genpart_parent.pdgId)==24))
+    genparts = genparts[genpart_filter2]
 
-    # make sure particle is a quark
-    genpart_filter3 = ((np.abs(genpart_reduced.pdgId)<9) & 
-                       (np.abs(genpart_reduced.pdgId)>0))
-    genpart_reduced = genpart_reduced[genpart_filter3]
+    # ensure particle itself is a quark
+    genpart_filter3 = ((np.abs(genparts.pdgId)<7) & (np.abs(genparts.pdgId)>0))
+    genparts = genparts[genpart_filter3]
 
-    # get rid of copies
-    genpart_filter4 = genpart_reduced.hasFlags("isLastCopy")
-    genpart_reduced = genpart_reduced[genpart_filter4]
+    # get rid of duplicates
+    genpart_filter4 = genparts.hasFlags("isLastCopy")
+    genparts = genparts[genpart_filter4]
             
-    # get labels
-    nearest_genpart = jets.nearest(genpart_reduced, threshold=0.4)
-            
-    labels = nearest_genpart.distinctParent.pdgId
-    
-    # edit labels
-    counts = ak.num(labels)
-    labels_flat = np.abs(ak.flatten(labels).to_numpy())
-    labels_flat[(labels_flat!=6)&(labels_flat!=24)]=0 # other
-    labels_flat[(labels_flat==6)]=1 # top quark
-    labels_flat[(labels_flat==24)]=2 # W boson
-    labels = ak.unflatten(labels_flat, counts)
-    labels = ak.fill_none(labels,0)
-            
-    # make sure events have 2 W jets and 2 t jets
-    jet_truth_filter = ((ak.sum(labels==1, axis=-1)==2) & 
-                        (ak.sum(labels==2, axis=-1)==2))
+        
+    #### get jet-level labels and filter events to training set
+        
+    # match jets to nearest valid genPart candidate
+    nearest_genpart = jets.nearest(genparts, threshold=0.4)
+    nearest_parent = nearest_genpart.distinctParent # parent of matched particle
+
+    parent_pdgid = nearest_parent.pdgId # pdgId of parent particle
+    grandchild_pdgid = nearest_parent.distinctChildren.distinctChildren.pdgId # pdgId of particle's parent's grandchildren
+
+    grandchildren_flat = np.abs(ak.flatten(grandchild_pdgid,axis=-1)) # flatten innermost axis for convenience
+
+    # if particle has a cousin that is a lepton
+    has_lepton_cousin = (ak.sum(((grandchildren_flat%2==0) & (grandchildren_flat>10) & (grandchildren_flat<19)),
+                                axis=-1)>0)
+    # if particle has a cousin that is a neutrino
+    has_neutrino_cousin = (ak.sum(((grandchildren_flat%2==1) & (grandchildren_flat>10) & (grandchildren_flat<19)),
+                                  axis=-1)>0)
+
+    # if a particle has a lepton cousin and a neutrino cousin
+    has_both_cousins = ak.fill_none((has_lepton_cousin & has_neutrino_cousin), False).to_numpy()
+
+    # get labels from parent pdgId (fill none with 100 to filter out events with those jets)
+    labels = np.abs(ak.fill_none(parent_pdgid,100).to_numpy())
+    labels[has_both_cousins] = -6 # assign jets with both cousins as top1 (not necessarily antiparticle)
+
+    training_event_filter = (np.sum(labels,axis=1)==48) # events with a label sum of 48 have the correct particles
             
     # filter events
-    jets = jets[jet_truth_filter]
-    electrons = electrons[jet_truth_filter]
-    muons = muons[jet_truth_filter]
-    labels = labels[jet_truth_filter]
+    jets = jets[training_event_filter]
+    electrons = electrons[training_event_filter]
+    muons = muons[training_event_filter]
+    labels = labels[training_event_filter]
     
     return jets, electrons, muons, labels
     
 
-def get_vars(jets, electrons, muons):
+def get_training_set(jets, electrons, muons, labels):
     
-    mass_0_1 = (jets[:,0] + jets[:,1]).mass
-    mass_0_2 = (jets[:,0] + jets[:,2]).mass
-    mass_0_3 = (jets[:,0] + jets[:,3]).mass
-    mass_1_2 = (jets[:,1] + jets[:,2]).mass
-    mass_1_3 = (jets[:,1] + jets[:,3]).mass
-    mass_2_3 = (jets[:,2] + jets[:,3]).mass
-    mass_diag = ak.zeros_like(mass_0_1)
-
-    masspairs_0 = np.vstack((mass_diag, mass_0_1,  mass_0_2,  mass_0_3 )).to_numpy().T
-    masspairs_1 = np.vstack((mass_0_1,  mass_diag, mass_1_2,  mass_1_3 )).to_numpy().T
-    masspairs_2 = np.vstack((mass_0_2,  mass_1_2,  mass_diag, mass_2_3 )).to_numpy().T
-    masspairs_3 = np.vstack((mass_0_3,  mass_1_3,  mass_2_3,  mass_diag)).to_numpy().T
-
-    masspairs = np.stack((masspairs_0,masspairs_1,masspairs_2,masspairs_3),axis=-1)
+    # permutations of jets to consider
+    permutation_ind = np.array([[0,1,2,3],[0,1,3,2],[0,2,1,3],[0,3,1,2],
+                                [0,2,3,1],[0,3,2,1],[2,0,1,3],[3,0,1,2],
+                                [2,0,3,1],[3,0,2,1],[2,3,0,1],[3,2,0,1]])
+    # corresponding jet labels to above permutations
+    permutation_labels = np.array([[24,24,6,-6],[24,24,-6,6],[24,6,24,-6],[24,-6,24,6],
+                                   [24,6,-6,24],[24,-6,6,24],[6,24,24,-6],[-6,24,24,6],
+                                   [6,24,-6,24],[-6,24,6,24],[6,-6,24,24],[-6,6,24,24]])
     
-    deltar_0_1 = np.sqrt((jets[:,0].phi-jets[:,1].phi)**2 + 
-                         (jets[:,0].eta-jets[:,1].eta)**2)
-    deltar_0_2 = np.sqrt((jets[:,0].phi-jets[:,2].phi)**2 + 
-                         (jets[:,0].eta-jets[:,2].eta)**2)
-    deltar_0_3 = np.sqrt((jets[:,0].phi-jets[:,3].phi)**2 + 
-                         (jets[:,0].eta-jets[:,3].eta)**2)
-    deltar_1_2 = np.sqrt((jets[:,1].phi-jets[:,2].phi)**2 + 
-                         (jets[:,1].eta-jets[:,2].eta)**2)
-    deltar_1_3 = np.sqrt((jets[:,1].phi-jets[:,3].phi)**2 + 
-                         (jets[:,1].eta-jets[:,3].eta)**2)
-    deltar_2_3 = np.sqrt((jets[:,2].phi-jets[:,3].phi)**2 + 
-                         (jets[:,2].eta-jets[:,3].eta)**2)
-    deltar_diag = ak.zeros_like(mass_0_1)
-
-    deltarpairs_0 = np.vstack((deltar_diag, deltar_0_1,  deltar_0_2,  deltar_0_3 )).to_numpy().T
-    deltarpairs_1 = np.vstack((deltar_0_1,  deltar_diag, deltar_1_2,  deltar_1_3 )).to_numpy().T
-    deltarpairs_2 = np.vstack((deltar_0_2,  deltar_1_2,  deltar_diag, deltar_2_3 )).to_numpy().T
-    deltarpairs_3 = np.vstack((deltar_0_3,  deltar_1_3,  deltar_2_3,  deltar_diag)).to_numpy().T
-
-    deltarpairs = np.stack((deltarpairs_0,deltarpairs_1,deltarpairs_2,deltarpairs_3),axis=-1)
-            
-    deltaphi_0_1 = np.abs(jets[:,0].phi-jets[:,1].phi)
-    deltaphi_0_2 = np.abs(jets[:,0].phi-jets[:,2].phi)
-    deltaphi_0_3 = np.abs(jets[:,0].phi-jets[:,3].phi)
-    deltaphi_1_2 = np.abs(jets[:,1].phi-jets[:,2].phi)
-    deltaphi_1_3 = np.abs(jets[:,1].phi-jets[:,3].phi)
-    deltaphi_2_3 = np.abs(jets[:,2].phi-jets[:,3].phi)
-    deltaphi_diag = ak.zeros_like(mass_0_1)
-
-    deltaphipairs_0 = np.vstack((deltaphi_diag, deltaphi_0_1,  deltaphi_0_2,  deltaphi_0_3 )).to_numpy().T
-    deltaphipairs_1 = np.vstack((deltaphi_0_1,  deltaphi_diag, deltaphi_1_2,  deltaphi_1_3 )).to_numpy().T
-    deltaphipairs_2 = np.vstack((deltaphi_0_2,  deltaphi_1_2,  deltaphi_diag, deltaphi_2_3 )).to_numpy().T
-    deltaphipairs_3 = np.vstack((deltaphi_0_3,  deltaphi_1_3,  deltaphi_2_3,  deltaphi_diag)).to_numpy().T
-
-    deltaphipairs = np.stack([deltaphipairs_0,deltaphipairs_1,deltaphipairs_2,deltaphipairs_3],axis=-1)
-            
-    deltaeta_0_1 = np.abs(jets[:,0].eta-jets[:,1].eta)
-    deltaeta_0_2 = np.abs(jets[:,0].eta-jets[:,2].eta)
-    deltaeta_0_3 = np.abs(jets[:,0].eta-jets[:,3].eta)
-    deltaeta_1_2 = np.abs(jets[:,1].eta-jets[:,2].eta)
-    deltaeta_1_3 = np.abs(jets[:,1].eta-jets[:,3].eta)
-    deltaeta_2_3 = np.abs(jets[:,2].eta-jets[:,3].eta)
-    deltaeta_diag = ak.zeros_like(mass_0_1)
-
-    deltaetapairs_0 = np.vstack((deltaeta_diag, deltaeta_0_1,  deltaeta_0_2,  deltaeta_0_3)).to_numpy().T
-    deltaetapairs_1 = np.vstack((deltaeta_0_1,  deltaeta_diag, deltaeta_1_2,  deltaeta_1_3)).to_numpy().T
-    deltaetapairs_2 = np.vstack((deltaeta_0_2,  deltaeta_1_2,  deltaeta_diag, deltaeta_2_3)).to_numpy().T
-    deltaetapairs_3 = np.vstack((deltaeta_0_3,  deltaeta_1_3,  deltaeta_2_3,  deltaeta_diag)).to_numpy().T
-
-    deltaetapairs = np.stack([deltaetapairs_0,deltaetapairs_1,deltaetapairs_2,deltaetapairs_3],axis=-1)
-            
-    jet_pt = np.array(jets.pt)
-    jet_eta = np.array(jets.eta)
-    jet_phi = np.array(jets.phi)
-    jet_mass = np.array(jets.mass)
-
-    jet_4vec = np.stack((jet_pt,jet_eta,jet_phi,jet_mass),axis=-1)
-            
-    lepton_eta = ak.sum(electrons.eta,axis=-1) + ak.sum(muons.eta,axis=-1)
-    lepton_phi = ak.sum(electrons.pt,axis=-1) + ak.sum(muons.phi,axis=-1)
-            
-    deltaphi_lepton = np.abs(jets.phi - lepton_phi).to_numpy()
-    deltaeta_lepton = np.abs(jets.eta - lepton_eta).to_numpy()
-    deltar_lepton = np.sqrt((jets.phi - lepton_phi)**2 + 
-                            (jets.eta - lepton_eta)**2).to_numpy()
-    lepton_vars = np.stack((deltaphi_lepton, deltaeta_lepton, deltar_lepton),axis=-1)
-            
-    other_vars = np.stack((jets.nConstituents.to_numpy(),
-                           # jets.btagCSVV2.to_numpy(),
-                           jets.area.to_numpy()), 
-                          axis=-1)
-            
-    features = np.concatenate((masspairs, deltarpairs, deltaphipairs, 
-                               deltaetapairs, jet_4vec, lepton_vars, other_vars), axis=2)
     
-    return features
+    #### calculate features ####
+    
+    features = np.zeros((len(jets),12,19))
+                        
+    # grab lepton info
+    lepton_eta = (ak.sum(electrons.eta,axis=-1) + ak.sum(muons.eta,axis=-1)).to_numpy().reshape((len(jets),1))
+    lepton_phi = (ak.sum(electrons.phi,axis=-1) + ak.sum(muons.phi,axis=-1)).to_numpy().reshape((len(jets),1))
+    lepton_mass = (ak.sum(electrons.mass,axis=-1) + ak.sum(muons.mass,axis=-1)).to_numpy().reshape((len(jets),1))
+    
+    # delta R between top1 and lepton
+    features[:,:,0] = np.sqrt((lepton_eta - jets[:,permutation_ind[:,3]].eta)**2 + 
+                              (lepton_phi - jets[:,permutation_ind[:,3]].phi)**2)
+
+    # delta R between the two W
+    features[:,:,1] = np.sqrt((jets[:,permutation_ind[:,0]].eta - jets[:,permutation_ind[:,1]].eta)**2 + 
+                              (jets[:,permutation_ind[:,0]].phi - jets[:,permutation_ind[:,1]].phi)**2)
+
+    # delta R between W and top2
+    features[:,:,2] = np.sqrt((jets[:,permutation_ind[:,0]].eta - jets[:,permutation_ind[:,2]].eta)**2 + 
+                              (jets[:,permutation_ind[:,0]].phi - jets[:,permutation_ind[:,2]].phi)**2)
+    features[:,:,3] = np.sqrt((jets[:,permutation_ind[:,0]].eta - jets[:,permutation_ind[:,2]].eta)**2 + 
+                              (jets[:,permutation_ind[:,1]].phi - jets[:,permutation_ind[:,2]].phi)**2)
+
+    # delta phi between top1 and lepton
+    features[:,:,4] = np.abs(lepton_phi - jets[:,permutation_ind[:,3]].phi)
+
+    # delta phi between the two W
+    features[:,:,5] = np.abs(jets[:,permutation_ind[:,0]].phi - jets[:,permutation_ind[:,1]].phi)
+
+    # delta phi between W and top2
+    features[:,:,6] = np.abs(jets[:,permutation_ind[:,0]].phi - jets[:,permutation_ind[:,2]].phi)
+    features[:,:,7] = np.abs(jets[:,permutation_ind[:,1]].phi - jets[:,permutation_ind[:,2]].phi)
+
+    # combined mass of top1 and lepton
+    features[:,:,8] = lepton_mass + jets[:,permutation_ind[:,3]].mass
+
+    # combined mass of W
+    features[:,:,9] = jets[:,permutation_ind[:,0]].mass + jets[:,permutation_ind[:,1]].mass
+
+    # combined mass of W and top2
+    features[:,:,10] = jets[:,permutation_ind[:,0]].mass + jets[:,permutation_ind[:,1]].mass + jets[:,permutation_ind[:,2]].mass
+
+    # pt of every jet
+    features[:,:,11] = jets[:,permutation_ind[:,0]].pt
+    features[:,:,12] = jets[:,permutation_ind[:,1]].pt
+    features[:,:,13] = jets[:,permutation_ind[:,2]].pt
+    features[:,:,14] = jets[:,permutation_ind[:,3]].pt
+
+    # mass of every jet
+    features[:,:,15] = jets[:,permutation_ind[:,0]].mass
+    features[:,:,16] = jets[:,permutation_ind[:,1]].mass
+    features[:,:,17] = jets[:,permutation_ind[:,2]].mass
+    features[:,:,18] = jets[:,permutation_ind[:,3]].mass
+
+    
+    #### calculate combination-level labels ####
+    
+    # which combination does the truth label correspond to?
+    which_combination = np.zeros(len(jets), dtype=int)
+    for i in range(12):
+        which_combination[(labels[:]==permutation_labels[i,:]).all(1)] = i
+
+    # convert to combination-level truth label (0 or 1)
+    which_combination = list(zip(range(len(jets),), which_combination))
+    truth_labels = np.zeros((len(jets),12))
+    for i,tpl in enumerate(which_combination):
+        truth_labels[tpl]=1
+        
+        
+    #### flatten to combinations (easy to unflatten since each event always has 12 combinations) ####
+    labels = truth_labels.reshape((truth_labels.shape[0]*truth_labels.shape[1],1))
+    features = features.reshape((features.shape[0]*features.shape[1],features.shape[2]))    
+        
+    return features, labels
 
 
 ```
@@ -274,15 +276,21 @@ class JetClassifier(processor_base):
             selected_muons_region = selected_muons[region_filter]
             selected_genpart_region = selected_genpart[region_filter]
             
-            # filtere events and calculate labels
-            selected_jets_region, selected_electrons_region, selected_muons_region, labels = training_filter(selected_jets_region, selected_electrons_region, selected_muons_region, selected_genpart_region)
+            # filter events and calculate labels
+            jets, electrons, muons, labels = training_filter(selected_jets_region, 
+                                                             selected_electrons_region, 
+                                                             selected_muons_region, 
+                                                             selected_genpart_region)
             
-            # calculate features
-            features = get_vars(selected_jets_region, selected_electrons_region, selected_muons_region)
+            # calculate features and labels
+            features, labels = get_training_set(jets, electrons, muons, labels)
             
+        # features = np.ones(len(events))
+        # labels = np.ones(len(events))
+    
         output = {"nevents": {events.metadata["dataset"]: len(events)},
                   "features": {events.metadata["dataset"]: features.tolist()},
-                  "labels": {events.metadata["dataset"]: labels.to_list()}}
+                  "labels": {events.metadata["dataset"]: labels.tolist()}}
             
         return output
         
@@ -299,7 +307,11 @@ for key in fileset_keys:
 ```
 
 ```python
-fileset
+fileset = {'ttbar__nominal': {'files': ['https://xrootd-local.unl.edu:1094//store/user/AGC/nanoAOD/TT_TuneCUETP8M1_13TeV-powheg-pythia8/cmsopendata2015_ttbar_19980_PU25nsData2015v1_76X_mcRun2_asymptotic_v12_ext3-v1_00000_0001.root'],
+  'metadata': {'process': 'ttbar',
+   'variation': 'nominal',
+   'nevts': 1334428,
+   'xsec': 729.84}}}
 ```
 
 ```python
@@ -321,57 +333,23 @@ output, metrics = run(fileset,
 
 ```python
 features = np.array(output['features']['ttbar__nominal'])
-labels = np.array(output['labels']['ttbar__nominal'])-1
+labels = np.array(output['labels']['ttbar__nominal'])
+labels = labels.reshape((len(labels),))
 ```
 
 ```python
-from itertools import combinations
+print(features.shape)
+print(labels.shape)
 ```
 
 ```python
-mass_tW = []
-mass_tt = []
-mass_WW = []
+signal = features[labels==1,:]
+background = features[labels==0,:]
+```
 
-deltar_tW = []
-deltar_tt = []
-deltar_WW = []
-
-deltaphi_tW = []
-deltaphi_tt = []
-deltaphi_WW = []
-
-deltaeta_tW = []
-deltaeta_tt = []
-deltaeta_WW = []
-
-for event in range(features.shape[0]):
-    labels_permutations = np.array(list(combinations(labels[0,:],2)))
-    labels_indices = np.array(list((i,j) for ((i,_),(j,_)) 
-                                   in combinations(enumerate(labels[0,:]), 2)))
-    sum_permutations = np.array([sum(labels_permutations[i,:]) for i in range(6)])
-    
-    tW_inds = np.array(labels_indices)[sum_permutations==1]
-    tt_inds = np.array(labels_indices)[sum_permutations==0]
-    WW_inds = np.array(labels_indices)[sum_permutations==2]
-    
-    for i in tW_inds:
-        mass_tW.append(features[event,i[0],i[1]])
-        deltar_tW.append(features[event,i[0],i[1]+4])
-        deltaphi_tW.append(features[event,i[0],i[1]+8])
-        deltaeta_tW.append(features[event,i[0],i[1]+12])
-        
-    for i in tt_inds:
-        mass_tt.append(features[event,i[0],i[1]])
-        deltar_tt.append(features[event,i[0],i[1]+4])
-        deltaphi_tt.append(features[event,i[0],i[1]+8])
-        deltaeta_tt.append(features[event,i[0],i[1]+12])
-        
-    for i in WW_inds:
-        mass_WW.append(features[event,i[0],i[1]])
-        deltar_WW.append(features[event,i[0],i[1]+4])
-        deltaphi_WW.append(features[event,i[0],i[1]+8])
-        deltaeta_WW.append(features[event,i[0],i[1]+12])
+```python
+print(signal.shape)
+print(background.shape)
 ```
 
 ```python
@@ -379,246 +357,126 @@ import matplotlib.pyplot as plt
 ```
 
 ```python
-bins = np.linspace(0,800,200)
-plt.hist(mass_tW,histtype='step',bins=bins,density=True)
-plt.hist(mass_tt,histtype='step',bins=bins,density=True)
-plt.hist(mass_WW,histtype='step',bins=bins,density=True)
-plt.legend(["t-W", "t-t", "W-W"])
-plt.xlabel("combined mass [GeV]")
-plt.xlim([0,300])
+#### delta R plots ####
+
+bins = np.linspace(0,8,100)
+plt.hist(signal[:,0], histtype='step', bins=bins, density=True)
+plt.hist(background[:,0], histtype='step', bins=bins, density=True)
+plt.legend(["Correct Combination", "Incorrect Combination"])
+plt.xlabel("$\Delta R$ between top1 jet and lepton")
 plt.show()
 
-bins = np.linspace(0,10,150)
-plt.hist(deltar_tW,histtype='step',bins=bins,density=True)
-plt.hist(deltar_tt,histtype='step',bins=bins,density=True)
-plt.hist(deltar_WW,histtype='step',bins=bins,density=True)
-plt.legend(["t-W", "t-t", "W-W"])
-plt.xlabel("$\Delta R$")
+bins = np.linspace(0,8,100)
+plt.hist(signal[:,1], histtype='step', bins=bins, density=True)
+plt.hist(background[:,1], histtype='step', bins=bins, density=True)
+plt.legend(["Correct Combination", "Incorrect Combination"])
+plt.xlabel("$\Delta R$ between the two W jets")
 plt.show()
 
-bins = np.linspace(0,6.3,100)
-plt.hist(deltaphi_tW,histtype='step',bins=bins,density=True)
-plt.hist(deltaphi_tt,histtype='step',bins=bins,density=True)
-plt.hist(deltaphi_WW,histtype='step',bins=bins,density=True)
-plt.legend(["t-W", "t-t", "W-W"])
-plt.xlabel("$\Delta \phi$")
-plt.show()
-
-bins = np.linspace(0,6.3,100)
-plt.hist(deltaeta_tW,histtype='step',bins=bins,density=True)
-plt.hist(deltaeta_tt,histtype='step',bins=bins,density=True)
-plt.hist(deltaeta_WW,histtype='step',bins=bins,density=True)
-plt.legend(["t-W", "t-t", "W-W"])
-plt.xlabel("$\Delta \eta$")
+bins = np.linspace(0,8,100)
+plt.hist(np.concatenate((signal[:,2],signal[:,3])), histtype='step', bins=bins, density=True)
+plt.hist(np.concatenate((background[:,2],background[:,3])), histtype='step', bins=bins, density=True)
+plt.legend(["Correct Combination", "Incorrect Combination"])
+plt.xlabel("$\Delta R$ between W jet and top2 jet")
 plt.show()
 ```
 
 ```python
-features_flat = features.reshape((features.shape[0]*features.shape[1],features.shape[2]))
-labels_flat = labels.reshape((labels.shape[0]*labels.shape[1]))
+#### delta phi plots ####
+
+bins = np.linspace(0,2*np.pi,100)
+plt.hist(signal[:,4], histtype='step', bins=bins, density=True)
+plt.hist(background[:,4], histtype='step', bins=bins, density=True)
+plt.legend(["Correct Combination", "Incorrect Combination"])
+plt.xlabel("$\Delta\phi$ between top1 jet and lepton")
+plt.show()
+
+bins = np.linspace(0,2*np.pi,100)
+plt.hist(signal[:,5], histtype='step', bins=bins, density=True)
+plt.hist(background[:,5], histtype='step', bins=bins, density=True)
+plt.legend(["Correct Combination", "Incorrect Combination"])
+plt.xlabel("$\Delta\phi$ between the two W jets")
+plt.show()
+
+bins = np.linspace(0,2*np.pi,100)
+plt.hist(np.concatenate((signal[:,6],signal[:,7])), histtype='step', bins=bins, density=True)
+plt.hist(np.concatenate((background[:,6],background[:,7])), histtype='step', bins=bins, density=True)
+plt.legend(["Correct Combination", "Incorrect Combination"])
+plt.xlabel("$\Delta\phi$ between W jet and top2 jet")
+plt.show()
 ```
 
 ```python
-pt_wjet = features_flat[:,16][labels_flat==1]
-pt_tjet = features_flat[:,16][labels_flat==0]
+#### mass plots ####
 
-bins = np.linspace(0,300,100)
-plt.hist(pt_wjet,histtype='step',bins=bins,density=True)
-plt.hist(pt_tjet,histtype='step',bins=bins,density=True)
-plt.legend(["W jet", "t jet"])
+bins = np.linspace(0,30,100)
+plt.hist(signal[:,8], histtype='step', bins=bins, density=True)
+plt.hist(background[:,8], histtype='step', bins=bins, density=True)
+plt.legend(["Correct Combination", "Incorrect Combination"])
+plt.xlabel("Combined mass of top1 jet and lepton [GeV]")
+plt.show()
+
+bins = np.linspace(5,70,100)
+plt.hist(signal[:,9], histtype='step', bins=bins, density=True)
+plt.hist(background[:,9], histtype='step', bins=bins, density=True)
+plt.legend(["Correct Combination", "Incorrect Combination"])
+plt.xlabel("Combined mass of the two W jets [GeV]")
+plt.show()
+
+bins = np.linspace(10,100,100)
+plt.hist(signal[:,10], histtype='step', bins=bins, density=True)
+plt.hist(background[:,10], histtype='step', bins=bins, density=True)
+plt.legend(["Correct Combination", "Incorrect Combination"])
+plt.xlabel("Combined mass of W jets and top2 jet [GeV]")
+plt.show()
+```
+
+```python
+#### pT plots ####
+
+bins = np.linspace(25,300,100)
+plt.hist(np.concatenate((signal[:,11],signal[:,12])), histtype='step', bins=bins, density=True)
+plt.hist(np.concatenate((background[:,11],background[:,12])), histtype='step', bins=bins, density=True)
+plt.legend(["Correctly Labeled W Jet", "Other"])
 plt.xlabel("Jet $p_T$ [GeV]")
 plt.show()
 
-eta_wjet = features_flat[:,17][labels_flat==1]
-eta_tjet = features_flat[:,17][labels_flat==0]
-
-bins = np.linspace(0,5,100)
-plt.hist(eta_wjet,histtype='step',bins=bins,density=True)
-plt.hist(eta_tjet,histtype='step',bins=bins,density=True)
-plt.legend(["W jet", "t jet"])
-plt.xlabel("$\eta$")
+bins = np.linspace(25,300,100)
+plt.hist(signal[:,13], histtype='step', bins=bins, density=True)
+plt.hist(background[:,13], histtype='step', bins=bins, density=True)
+plt.legend(["Correctly Labeled top2 Jet", "Other"])
+plt.xlabel("Jet $p_T$ [GeV]")
 plt.show()
 
-phi_wjet = features_flat[:,18][labels_flat==1]
-phi_tjet = features_flat[:,18][labels_flat==0]
-
-bins = np.linspace(0,3.15,100)
-plt.hist(phi_wjet,histtype='step',bins=bins,density=True)
-plt.hist(phi_tjet,histtype='step',bins=bins,density=True)
-plt.legend(["W jet", "t jet"])
-plt.xlabel("$\phi$")
+bins = np.linspace(25,300,100)
+plt.hist(signal[:,14], histtype='step', bins=bins, density=True)
+plt.hist(background[:,14], histtype='step', bins=bins, density=True)
+plt.legend(["Correctly Labeled top1 Jet", "Other"])
+plt.xlabel("Jet $p_T$ [GeV]")
 plt.show()
+```
 
-m_wjet = features_flat[:,19][labels_flat==1]
-m_tjet = features_flat[:,19][labels_flat==0]
+```python
+#### jet mass plots ####
 
 bins = np.linspace(0,50,100)
-plt.hist(m_wjet,histtype='step',bins=bins,density=True)
-plt.hist(m_tjet,histtype='step',bins=bins,density=True)
-plt.legend(["W jet", "t jet"])
-plt.xlabel("Jet mass [GeV]")
-plt.show()
-```
-
-```python
-deltaphi_lepton_wjet = features_flat[:,20][labels_flat==1]
-deltaphi_lepton_tjet = features_flat[:,20][labels_flat==0]
-
-bins = np.linspace(0,2*np.pi,50)
-plt.hist(deltaphi_lepton_wjet,histtype='step',bins=bins,density=True)
-plt.hist(deltaphi_lepton_tjet,histtype='step',bins=bins,density=True)
-plt.legend(["W jet", "t jet"])
-plt.xlabel("$\Delta\phi$ between jet and lepton")
+plt.hist(np.concatenate((signal[:,15],signal[:,16])), histtype='step', bins=bins, density=True)
+plt.hist(np.concatenate((background[:,15],background[:,16])), histtype='step', bins=bins, density=True)
+plt.legend(["Correctly Labeled W Jet", "Other"])
+plt.xlabel("Jet Mass [GeV]")
 plt.show()
 
-deltaeta_lepton_wjet = features_flat[:,21][labels_flat==1]
-deltaeta_lepton_tjet = features_flat[:,21][labels_flat==0]
-
-bins = np.linspace(0,6.5,50)
-plt.hist(deltaeta_lepton_wjet,histtype='step',bins=bins,density=True)
-plt.hist(deltaeta_lepton_tjet,histtype='step',bins=bins,density=True)
-plt.legend(["W jet", "t jet"])
-plt.xlabel("$\Delta\eta$ between jet and lepton")
+bins = np.linspace(0,50,100)
+plt.hist(signal[:,17], histtype='step', bins=bins, density=True)
+plt.hist(background[:,17], histtype='step', bins=bins, density=True)
+plt.legend(["Correctly Labeled top2 Jet", "Other"])
+plt.xlabel("Jet Mass [GeV]")
 plt.show()
 
-deltar_lepton_wjet = features_flat[:,22][labels_flat==1]
-deltar_lepton_tjet = features_flat[:,22][labels_flat==0]
-
-bins = np.linspace(0,8,50)
-plt.hist(deltar_lepton_wjet,histtype='step',bins=bins,density=True)
-plt.hist(deltar_lepton_tjet,histtype='step',bins=bins,density=True)
-plt.legend(["W jet", "t jet"])
-plt.xlabel("$\Delta R$ between jet and lepton")
+bins = np.linspace(0,50,100)
+plt.hist(signal[:,18], histtype='step', bins=bins, density=True)
+plt.hist(background[:,18], histtype='step', bins=bins, density=True)
+plt.legend(["Correctly Labeled top1 Jet", "Other"])
+plt.xlabel("Jet Mass [GeV]")
 plt.show()
-```
-
-```python
-nconst_wjet = features_flat[:,23][labels_flat==1]
-nconst_tjet = features_flat[:,23][labels_flat==0]
-
-bins = np.linspace(0,60,60,dtype=int)
-plt.hist(nconst_wjet,histtype='step',bins=bins,density=True)
-plt.hist(nconst_tjet,histtype='step',bins=bins,density=True)
-plt.legend(["W jet", "t jet"])
-plt.xlabel("Number of Constituents")
-plt.show()
-
-
-area_wjet = features_flat[:,24][labels_flat==1]
-area_tjet = features_flat[:,24][labels_flat==0]
-
-bins = np.linspace(0.2,0.8,50)
-plt.hist(area_wjet,histtype='step',bins=bins,density=True)
-plt.hist(area_tjet,histtype='step',bins=bins,density=True)
-plt.legend(["W jet", "t jet"])
-plt.xlabel("Jet area")
-plt.show()
-```
-
-```python
-#defining dataset class
-from torch.utils.data import Dataset, DataLoader
-import torch
-
-class dataset(Dataset):
-    def __init__(self,x,y):
-        self.x = torch.tensor(x,dtype=torch.float32)
-        self.y = torch.tensor(y,dtype=torch.float32)
-        self.length = self.x.shape[0]
- 
-    def __getitem__(self,idx):
-        return self.x[idx],self.y[idx]
-    def __len__(self):
-        return self.length
-```
-
-```python
-#defining the network
-import torch
-from torch import nn
-from torch.nn import functional as F
-class Net(nn.Module):
-    def __init__(self,input_shape):
-        super(Net,self).__init__()
-        self.fc1 = nn.Linear(input_shape,input_shape*2)
-        self.fc2 = nn.Linear(input_shape*2,input_shape*4)
-        self.fc3 = nn.Linear(input_shape*4,input_shape*2)
-        self.fc4 = nn.Linear(input_shape*2,input_shape)
-        self.fc5 = nn.Linear(input_shape,1)
-    def forward(self,x):
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        x = torch.relu(self.fc3(x))
-        x = torch.relu(self.fc4(x))
-        x = torch.sigmoid(self.fc5(x))
-        return x
-```
-
-```python
-from torch.utils.data import random_split
-from torch import Generator
-
-data = dataset(features,labels)
-
-train, validation = random_split(data, 
-                                 [0.85, 0.15], # fractions for train, validation
-                                 generator=torch.Generator().manual_seed(42))
-```
-
-```python
-trainloader = DataLoader(train,batch_size=64,shuffle=False)
-valloader = DataLoader(validation,batch_size=len(validation),shuffle=False)
-```
-
-```python
-#hyper parameters
-learning_rate = 0.005
-epochs = 200
-# Model , Optimizer, Loss
-model = Net(input_shape=features.shape[2])
-optimizer = torch.optim.SGD(model.parameters(),lr=learning_rate)
-loss_fn = nn.MSELoss() # mean squared error loss function
-```
-
-```python
-#forward loop
-losses = []
-accur = []
-for i in range(epochs):
-    model.train()
-    for j,(x_train,y_train) in enumerate(trainloader):
-    
-        #calculate output
-        output = model(x_train)
- 
-        #calculate loss
-        loss = loss_fn(output,y_train.reshape(y_train.shape[0],y_train.shape[1],1))
- 
-        #backprop
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-                
-    model.eval()
-    for m,n in valloader:
-        # print(model(m).shape)
-        # print(model(m).reshape(-1).shape)
-        # print(n.shape)
-        n = n.reshape((n.shape[0],n.shape[1],1))
-        pred = model(m).detach().numpy().round()
-        # print(pred[0,:,:])
-        # print(n[0,:,:])
-        acc = np.mean(pred==np.array(n))
-
-    losses.append(loss.item())
-    accur.append(acc)
-    print("epoch {}\tloss : {}\t accuracy : {}".format(i,loss,acc))
-```
-
-```python
-plt.plot(losses)
-```
-
-```python
-
 ```

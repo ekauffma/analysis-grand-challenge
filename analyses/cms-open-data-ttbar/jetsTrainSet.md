@@ -211,11 +211,11 @@ def get_training_set(jets, electrons, muons, labels):
     which_combination = list(zip(range(len(jets),), which_combination))
     which_anti_combination = list(zip(range(labels.shape[0],), which_anti_combination))
     
-    truth_labels = np.zeros((len(jets),12))
+    truth_labels = -1*np.ones((len(jets),12))
     for i,tpl in enumerate(which_combination):
         truth_labels[tpl]=1
     for i,tpl in enumerate(which_anti_combination):
-        truth_labels[tpl]=-1
+        truth_labels[tpl]=0
         
         
     #### flatten to combinations (easy to unflatten since each event always has 12 combinations) ####
@@ -228,6 +228,8 @@ def get_training_set(jets, electrons, muons, labels):
 ```
 
 ```python
+# define coffea processor
+
 processor_base = processor.ProcessorABC
 class JetClassifier(processor_base):
     def __init__(self, io_file_percent):
@@ -291,9 +293,6 @@ class JetClassifier(processor_base):
             
             # calculate features and labels
             features, labels = get_training_set(jets, electrons, muons, labels)
-            
-        # features = np.ones(len(events))
-        # labels = np.ones(len(events))
     
         output = {"nevents": {events.metadata["dataset"]: len(events)},
                   "features": {events.metadata["dataset"]: features.tolist()},
@@ -347,9 +346,11 @@ print(labels.shape)
 
 ```python
 all_correct = features[labels==1,:]
-some_correct = features[labels==0,:]
-none_correct = features[labels==-1,:]
+some_correct = features[labels==-1,:]
+none_correct = features[labels==0,:]
 ```
+
+# Histograms of Training Variables
 
 ```python
 import matplotlib.pyplot as plt
@@ -493,6 +494,101 @@ plt.hist(none_correct[:,18], histtype='step', bins=bins, density=True)
 plt.legend(legend_list)
 plt.xlabel("Jet Mass (top1) [GeV]")
 plt.show()
+```
+
+# Training
+
+```python
+import xgboost as xgb
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import PowerTransformer
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    roc_auc_score
+)
+```
+
+```python
+features = np.array(output['features']['ttbar__nominal'])
+labels = np.array(output['labels']['ttbar__nominal'])
+labels = labels.reshape((len(labels),))
+
+features = features[(labels==1) | (labels==0)]
+labels = labels[(labels==1) | (labels==0)]
+```
+
+```python
+# separate data into train/val/testr
+RANDOM_SEED = 5
+TRAIN_RATIO = 0.9
+features_train_and_val, features_test, labels_train_and_val, labels_test = train_test_split(features, 
+                                                                                            labels, 
+                                                                                            test_size=1-TRAIN_RATIO, 
+                                                                                            random_state=RANDOM_SEED)
+
+features_train, features_val, labels_train, labels_val = train_test_split(features_train_and_val, 
+                                                                          labels_train_and_val, 
+                                                                          stratify=labels_train_and_val, # makes sure sig/bkg is balanced since we have more bkg as sig
+                                                                          random_state=RANDOM_SEED)
+```
+
+```python
+# preprocess features so that they are more Gaussian-like
+power = PowerTransformer(method='yeo-johnson', standardize=True)
+
+features_train = power.fit_transform(features_train)
+features_val =power.transform(features_val)
+features_test = power.transform(features_test)
+```
+
+```python
+# define model parameters
+params = {'max_depth': 20,
+          'n_estimators': 100,
+          'learning_rate': 0.01,
+          'booster': 'gbtree',
+          'random_state': RANDOM_SEED,
+         }
+
+# define and fit model to data
+model = xgb.XGBClassifier(**params)
+model = model.fit(features_train, labels_train)
+```
+
+```python
+# make predictions
+train_predicted = model.predict(features_train)
+train_predicted_prob = model.predict_proba(features_train)[:, 1]
+val_predicted = model.predict(features_val)
+val_predicted_prob = model.predict_proba(features_val)[:, 1]
+```
+
+```python
+train_accuracy = accuracy_score(labels_train, train_predicted).round(3)
+train_precision = precision_score(labels_train, train_predicted).round(3)
+train_recall = recall_score(labels_train, train_predicted).round(3)
+train_f1 = f1_score(labels_train, train_predicted).round(3)
+train_aucroc = roc_auc_score(labels_train, train_predicted_prob).round(3)
+print("Training Accuracy = ", train_accuracy)
+print("Training Precision = ", train_precision)
+print("Training Recall = ", train_recall)
+print("Training f1 = ", train_f1)
+print("Training AUC = ", train_aucroc)
+print()
+
+val_accuracy = accuracy_score(labels_val, val_predicted).round(3)
+val_precision = precision_score(labels_val, val_predicted).round(3)
+val_recall = recall_score(labels_val, val_predicted).round(3)
+val_f1 = f1_score(labels_val, val_predicted).round(3)
+val_aucroc = roc_auc_score(labels_val, val_predicted_prob).round(3)
+print("Validation Accuracy = ", val_accuracy)
+print("Validation Precision = ", val_precision)
+print("Validation Recall = ", val_recall)
+print("Validation f1 = ", val_f1)
+print("Validation AUC = ", val_aucroc)
 ```
 
 ```python

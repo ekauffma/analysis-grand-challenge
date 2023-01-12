@@ -13,6 +13,26 @@ jupyter:
     name: python3
 ---
 
+# ttbar Analysis - Jet-Parton Assignment Training
+
+This is the training notebook for the jet-parton assignment task. The goal is to associate the leading four jets in each event to their associated parent particles. We are trying to assign jets according to the labels in the diagram below:
+
+<img src="utils/ttbar.png" alt="ttbar_labels" width="500"/>
+
+top1 and top2 jets do not necessarily correspond to top/antitop, respectively. The top1 jet is defined as having a lepton/neutrino pair as cousins, where the top2 jet is defined as having two jets as cousins. The W jets are not distinguished from each other.
+
+The strategy for solving this problem is to train a boosted decision tree to find the correct assignments for each jet. Since we consider four jets per event with three unique labels (W, top1, and top2), there are twelve possible combinations of assignments:
+
+<img src="utils/jetcombinations.png" alt="jetcombinations" width="700"/>
+
+The combination with the highest BDT score will be selected for each event.
+____
+
+The workflow for this training notebook is outlined as follows:
+* Load data and calculate training features and labels using `coffea`/`dask`
+* Optimize BDT (`xgboost` model) using `hyperopt` (TODO: Track using `mlflow`)
+* Save best model (TODO: save to `onnx`)
+
 ```python
 import asyncio
 import time
@@ -42,37 +62,39 @@ logging.getLogger("cabinetry").setLevel(logging.INFO)
 ```
 
 ```python
+### GLOBAL CONFIGURATION
+
+# input files per process, set to e.g. 10 (smaller number = faster, want to use larger number for training)
 N_FILES_MAX_PER_SAMPLE = 10
+
+# set to "dask" for DaskExecutor, "futures" for FuturesExecutor
+EXEC = "dask"
+
+# number of cores if using FuturesExecutor
 NUM_CORES = 16
+
+# chunk size to use
 CHUNKSIZE = 500_000
-IO_FILE_PERCENT = 4
-USE_DASK = True
+
+# analysis facility: set to "coffea_casa" for coffea-casa environments, "EAF" for FNAL, "local" for local setups
 AF = "coffea_casa"
 ```
 
 ```python
-# functions creating systematic variations
-def flat_variation(ones):
-    # 0.1% weight variations
-    return (1.0 + np.array([0.001, -0.001], dtype=np.float32)) * ones[:, None]
-
-
-def btag_weight_variation(i_jet, jet_pt):
-    # weight variation depending on i-th jet pT (10% as default value, multiplied by i-th jet pT / 50 GeV)
-    return 1 + np.array([0.1, -0.1]) * (ak.singletons(jet_pt[:, i_jet]) / 50).to_numpy()
-
-
-def jet_pt_resolution(pt):
-    # normal distribution with 5% variations, shape matches jets
-    counts = ak.num(pt)
-    pt_flat = ak.flatten(pt)
-    resolution_variation = np.random.normal(np.ones_like(pt_flat), 0.05)
-    return ak.unflatten(resolution_variation, counts)
-
-```
-
-```python
+## functions for calculating features and labels for the BDT
 def training_filter(jets, electrons, muons, genparts):
+    '''
+    Filters events down to training set and calculates jet-level labels
+    
+    Args:
+        jets: selected jets after region filter (and selecting leading four for each event)
+        electrons: selected electrons after region filter
+        muons: selected muons after region filter
+        genparts: selected genpart after region filter
+    
+    Returns:
+        jets, electrons, muons, labels
+    '''
     #### filter genPart to valid matching candidates ####
 
     # get rid of particles without parents
@@ -131,6 +153,18 @@ def training_filter(jets, electrons, muons, genparts):
     
 
 def get_training_set(jets, electrons, muons, labels):
+    '''
+    Calculate features for each of the 12 combinations per event and calculates combination-level labels
+    
+    Args:
+        jets: selected jets after training filter
+        electrons: selected electrons after training filter
+        muons: selected muons after training filter
+        labels: jet-level labels output by training_filter
+    
+    Returns:
+        features, labels (flattened to remove event level)
+    '''
     
     # permutations of jets to consider
     permutation_ind = np.array([[0,1,2,3],[0,1,3,2],[0,2,1,3],[0,3,1,2],
@@ -223,17 +257,17 @@ def get_training_set(jets, electrons, muons, labels):
     features = features.reshape((features.shape[0]*features.shape[1],features.shape[2]))    
         
     return features, labels
-
-
 ```
 
-```python
-# define coffea processor
+### Defining a `coffea` Processor
 
+The processor returns the training features and labels we will use in our BDT
+
+```python
 processor_base = processor.ProcessorABC
 class JetClassifier(processor_base):
-    def __init__(self, io_file_percent):
-        self.io_file_percent = io_file_percent
+    def __init__(self):
+        super().__init__()
     
     def process(self, events):
         
@@ -244,30 +278,24 @@ class JetClassifier(processor_base):
         x_sec = events.metadata["xsec"]
         nevts_total = events.metadata["nevts"]
         lumi = 3378 # /pb
-        if process != "data":
-            xsec_weight = x_sec * lumi / nevts_total
-        else:
-            xsec_weight = 1
-            
-        if process == "wjets":
-            events.add_systematic("scale_var", "UpDownSystematic", "weight", flat_variation)
+        xsec_weight = x_sec * lumi / nevts_total
             
         events["pt_nominal"] = 1.0
-        events["pt_scale_up"] = 1.03
-        events["pt_res_up"] = jet_pt_resolution(events.Jet.pt)
-        
-        pt_variations = ["pt_nominal", "pt_scale_up", "pt_res_up"] if variation == "nominal" else ["pt_nominal"]
+        pt_variations = ["pt_nominal"] if variation == "nominal" else ["pt_nominal"]
         for pt_var in pt_variations:
             
+            # filter electrons, muons, and jets by pT
             selected_electrons = events.Electron[events.Electron.pt > 30]
             selected_muons = events.Muon[events.Muon.pt > 30]
-            jet_filter = events.Jet.pt * events[pt_var] > 30
+            jet_filter = events.Jet.pt > 30
             selected_jets = events.Jet[jet_filter]
             selected_genpart = events.GenPart
             
+            # single lepton requirement
             event_filters = ((ak.count(selected_electrons.pt, axis=1) + ak.count(selected_muons.pt, axis=1)) == 1)
-            pt_var_modifier = events[pt_var] if "res" not in pt_var else events[pt_var][jet_filter]
-            event_filters = event_filters & (ak.count(selected_jets.pt * pt_var_modifier, axis=1) >= 4)
+            # require at least 4 jets
+            event_filters = event_filters & (ak.count(selected_jets.pt, axis=1) >= 4)
+            # require at least one jet above B_TAG_THRESHOLD
             B_TAG_THRESHOLD = 0.8
             event_filters = event_filters & (ak.sum(selected_jets.btagCSVV2 >= B_TAG_THRESHOLD, axis=1) >= 1)
             
@@ -279,7 +307,7 @@ class JetClassifier(processor_base):
             selected_genpart = selected_genpart[event_filters]
             
             ### only consider 4j2b region
-            region_filter = ak.sum(selected_jets.btagCSVV2 > B_TAG_THRESHOLD, axis=1) >= 2
+            region_filter = ak.sum(selected_jets.btagCSVV2 > B_TAG_THRESHOLD, axis=1) >= 2 # at least two b-tagged jets
             selected_jets_region = selected_jets[region_filter][:,:4] # only keep top 4 jets
             selected_electrons_region = selected_electrons[region_filter]
             selected_muons_region = selected_muons[region_filter]
@@ -304,61 +332,71 @@ class JetClassifier(processor_base):
         return accumulator
 ```
 
+### "Fileset" construction and metadata
+
+Here, we gather all the required information about the files we want to process: paths to the files and asociated metadata.
+
 ```python
-fileset = utils.construct_fileset(N_FILES_MAX_PER_SAMPLE, use_xcache=False, json_file = 'ntuples_nanoaod_agc.json')
+fileset = utils.construct_fileset(N_FILES_MAX_PER_SAMPLE, 
+                                  use_xcache=False, 
+                                  json_file = 'ntuples_nanoaod_agc.json')
+
+# get rid of everything except ttbar__nominal for training purposes
 fileset_keys = list(fileset.keys())
 for key in fileset_keys:
     if key!="ttbar__nominal":
         fileset.pop(key)
 ```
 
-```python
+```python tags=[]
 fileset
 ```
 
+### Execute the data delivery pipeline
+
 ```python
 schema = NanoAODSchema
-# executor = processor.FuturesExecutor(workers=NUM_CORES)
-executor = processor.DaskExecutor(client=utils.get_client(AF))
+
+if EXEC == "futures":
+    executor = processor.FuturesExecutor(workers=NUM_CORES)
+elif EXEC == "dask":
+    executor = processor.DaskExecutor(client=utils.get_client(AF))
+    
 run = processor.Runner(executor=executor, schema=schema, savemetrics=True, metadata_cache={}, chunksize=CHUNKSIZE)
-```
 
-```python
+# preprocess
 filemeta = run.preprocess(fileset, treename="Events")
-```
 
-```python
+# process
 output, metrics = run(fileset, 
                       "Events", 
-                      processor_instance = JetClassifier(IO_FILE_PERCENT))
+                      processor_instance = JetClassifier())
 ```
 
 ```python
+# grab features and labels and convert to np array
 features = np.array(output['features']['ttbar__nominal'])
 labels = np.array(output['labels']['ttbar__nominal'])
 labels = labels.reshape((len(labels),))
 ```
 
-```python
-print(features.shape)
-print(labels.shape)
-```
+The key for the labeling scheme is as follows
+
+* 1: all jet assignments are correct
+* 0: some jet assignments are correct (one or two are correct, others are incorrect)
+* -1: all jet assignments are incorrect
+
+There are twelve combinations for each event, so each event will have 1 correct combination, 2 completely incorrect combinations, and 9 partially correct combinations.
 
 ```python
+# separate by label for plotting
 all_correct = features[labels==1,:]
 some_correct = features[labels==-1,:]
 none_correct = features[labels==0,:]
 ```
 
 # Histograms of Training Variables
-
-```python
-import matplotlib.pyplot as plt
-```
-
-```python
-dir(hist.axis)
-```
+To vizualize the separation power of the different variables, histograms are created for each of the three labels. Only `all_correct` and `none_correct` are used for training purposes.
 
 ```python
 #### delta R histogram ####
@@ -566,7 +604,7 @@ fig.show()
 ```
 
 ```python
-#### pT histogram ####
+#### mass histogram ####
 
 # binning
 mass_low = 0.0
@@ -618,7 +656,11 @@ fig.show()
 
 # Model Optimization
 
-Greatly inspired by the workflow outlined in https://towardsdatascience.com/training-xgboost-with-mlflow-experiments-and-hyperopt-c0d3a4994ea6.
+The model used here is `xgboost`'s gradient-boosted decision tree (`XGBClassifier`). `hyperopt` is used to optimize the model parameters. A grid search to optimize model parameters can be a bit inconvenient, so `hyperopt`'s `fmin` function uses Bayesian methods to create a probabilistic model of the given parameter space and selects new values based on prior trials.
+
+The workflow outlined here is inspired by https://towardsdatascience.com/training-xgboost-with-mlflow-experiments-and-hyperopt-c0d3a4994ea6.
+
+TODO: Add tracking in `MLFlow`
 
 ```python
 import xgboost as xgb
@@ -640,14 +682,17 @@ features = np.array(output['features']['ttbar__nominal'])
 labels = np.array(output['labels']['ttbar__nominal'])
 labels = labels.reshape((len(labels),))
 
+# only consider combinations that are 100% correct or 0% correct
 features = features[(labels==1) | (labels==0)]
 labels = labels[(labels==1) | (labels==0)]
 ```
 
 ```python
-# separate data into train/val/testr
+### separate data into train/val/testr ###
+
 RANDOM_SEED = 5
-TRAIN_RATIO = 0.9
+TRAIN_RATIO = 0.9 # fraction of data to use for training
+
 features_train_and_val, features_test, labels_train_and_val, labels_test = train_test_split(features, 
                                                                                             labels, 
                                                                                             test_size=1-TRAIN_RATIO, 
@@ -671,16 +716,16 @@ features_test = power.transform(features_test)
 ```python
 # hyperopt trial values
 trial_params = {
-    'max_depth': scope.int(hp.quniform('max_depth', 2, 20, 1)),
-    'n_estimators': scope.int(hp.uniform('n_estimators', 50, 700)),
-    'learning_rate': hp.loguniform('learning_rate', -5, 0),
-    'min_child_weight': hp.loguniform('min_child_weight', -1, 7),
+    'max_depth': scope.int(hp.quniform('max_depth', 2, 20, 1)), # maximum depth of BDT
+    'n_estimators': scope.int(hp.uniform('n_estimators', 50, 700)), # number of gradient boosts applied to tree
+    'learning_rate': hp.loguniform('learning_rate', -5, 0), # learning rate of boosts
+    'min_child_weight': hp.loguniform('min_child_weight', -1, 7), # minimum weight needed in child node
     'reg_alpha': hp.loguniform('reg_alpha', -10, 10),
     'reg_lambda': hp.loguniform('reg_lambda', -10, 10),
-    'gamma': hp.loguniform('gamma', -10, 10),
-    'booster': 'gbtree',
-    'random_state': RANDOM_SEED,
-    'eval_metric': 'auc',
+    'gamma': hp.loguniform('gamma', -10, 10), # minimum loss reduction for a partition to occur
+    'booster': 'gbtree', # use a boosted decision tree
+    'random_state': RANDOM_SEED, # use same model initialization for each trial
+    'eval_metric': 'auc', # hyperopt will attempt to maximize AUC
                }
 ```
 
@@ -726,16 +771,23 @@ def train_and_evaluate(params):
 trials = Trials()
 
 # optimize model
-best_parameters = fmin(fn=train_and_evaluate, 
-                       space=trial_params, 
-                       algo=tpe.suggest,
-                       trials=trials,
-                       max_evals=50)
+best_parameters = fmin(
+    fn=train_and_evaluate, 
+    space=trial_params,
+    algo=tpe.suggest,
+    trials=trials,
+    max_evals=50 # how many trials to run
+                      )
 ```
 
 ```python
+# convert max_depth and n_estimators to integers
 best_parameters['max_depth'] = int(best_parameters['max_depth'])
 best_parameters['n_estimators'] = int(best_parameters['n_estimators'])
+```
+
+```python
+print("Best Model Parameters = ", best_parameters)
 ```
 
 # Training/Evaluation with Optimized Model
@@ -780,5 +832,6 @@ print("Validation AUC = ", val_aucroc)
 ```
 
 ```python
-
+# save model to json. this file can be used with the FIL backend in nvidia-triton!
+model.save_model("models/model_xgb.json")
 ```

@@ -357,146 +357,268 @@ import matplotlib.pyplot as plt
 ```
 
 ```python
-#### delta R plots ####
-
-bins = np.linspace(0,8,100)
-legend_list = ["All Matches Correct", "Some Matches Correct", "No Matches Correct"]
-plt.hist(all_correct[:,0], histtype='step', bins=bins, density=True)
-plt.hist(some_correct[:,0], histtype='step', bins=bins, density=True)
-plt.hist(none_correct[:,0], histtype='step', bins=bins, density=True)
-plt.legend(legend_list)
-plt.xlabel("$\Delta R$ between top1 jet and lepton")
-plt.show()
-
-plt.hist(all_correct[:,1], histtype='step', bins=bins, density=True)
-plt.hist(some_correct[:,1], histtype='step', bins=bins, density=True)
-plt.hist(none_correct[:,1], histtype='step', bins=bins, density=True)
-plt.legend(legend_list)
-plt.xlabel("$\Delta R$ between the two W jets")
-plt.show()
-
-plt.hist(np.concatenate((all_correct[:,2],all_correct[:,3])), histtype='step', bins=bins, density=True)
-plt.hist(np.concatenate((some_correct[:,2],some_correct[:,3])), histtype='step', bins=bins, density=True)
-plt.hist(np.concatenate((none_correct[:,2],none_correct[:,3])), histtype='step', bins=bins, density=True)
-plt.legend(legend_list)
-plt.xlabel("$\Delta R$ between W jet and top2 jet")
-plt.show()
+dir(hist.axis)
 ```
 
 ```python
-#### delta phi plots ####
+#### delta R histogram ####
 
-bins = np.linspace(0,2*np.pi,100)
+# binning
+deltar_low = 0.0
+deltar_high = 8.0
+deltar_numbins = 100
 legend_list = ["All Matches Correct", "Some Matches Correct", "No Matches Correct"]
 
-plt.hist(all_correct[:,4], histtype='step', bins=bins, density=True)
-plt.hist(some_correct[:,4], histtype='step', bins=bins, density=True)
-plt.hist(none_correct[:,4], histtype='step', bins=bins, density=True)
-plt.legend(legend_list)
-plt.xlabel("$\Delta\phi$ between top1 jet and lepton")
-plt.show()
+# define histogram
+h = hist.Hist(
+    hist.axis.Regular(deltar_numbins, deltar_low, deltar_high, name="deltar", label="$\Delta R$", flow=False),
+    hist.axis.StrCategory(legend_list, name="truthlabel", label="Truth Label"),
+    hist.axis.StrCategory(["top1_lepton","W_W","top2_W"], name="category", label="Category"),
+)
 
-plt.hist(all_correct[:,5], histtype='step', bins=bins, density=True)
-plt.hist(some_correct[:,5], histtype='step', bins=bins, density=True)
-plt.hist(none_correct[:,5], histtype='step', bins=bins, density=True)
-plt.legend(legend_list)
-plt.xlabel("$\Delta\phi$ between the two W jets")
-plt.show()
+# fill histogram
+h.fill(deltar = all_correct[:,0], category="top1_lepton", truthlabel="All Matches Correct")
+h.fill(deltar = some_correct[:,0], category="top1_lepton", truthlabel="Some Matches Correct")
+h.fill(deltar = none_correct[:,0], category="top1_lepton", truthlabel="No Matches Correct")
+h.fill(deltar = all_correct[:,1], category="W_W", truthlabel="All Matches Correct")
+h.fill(deltar = some_correct[:,1], category="W_W", truthlabel="Some Matches Correct")
+h.fill(deltar = none_correct[:,1], category="W_W", truthlabel="No Matches Correct")
+h.fill(deltar = all_correct[:,2], category="top2_W", truthlabel="All Matches Correct")
+h.fill(deltar = some_correct[:,2], category="top2_W", truthlabel="Some Matches Correct")
+h.fill(deltar = none_correct[:,2], category="top2_W", truthlabel="No Matches Correct")
+h.fill(deltar = all_correct[:,3], category="top2_W", truthlabel="All Matches Correct")
+h.fill(deltar = some_correct[:,3], category="top2_W", truthlabel="Some Matches Correct")
+h.fill(deltar = none_correct[:,3], category="top2_W", truthlabel="No Matches Correct")
 
-plt.hist(np.concatenate((all_correct[:,6],all_correct[:,7])), histtype='step', bins=bins, density=True)
-plt.hist(np.concatenate((some_correct[:,6],some_correct[:,7])), histtype='step', bins=bins, density=True)
-plt.hist(np.concatenate((none_correct[:,6],none_correct[:,7])), histtype='step', bins=bins, density=True)
-plt.legend(legend_list)
-plt.xlabel("$\Delta\phi$ between W jet and top2 jet")
-plt.show()
+# make plots
+fig,ax = plt.subplots(1,1,figsize=(8,4))
+h[0j::hist.rebin(2), :, "top1_lepton"].plot(density=True, ax=ax)
+ax.legend(legend_list)
+ax.set_title("$\Delta R$ between top1 jet and lepton")
+fig.show()
+
+fig,ax = plt.subplots(1,1,figsize=(8,4))
+h[0j::hist.rebin(2), :, "W_W"].plot(density=True, ax=ax)
+ax.legend(legend_list)
+ax.set_title("$\Delta R$ between the two W jets")
+fig.show()
+
+fig,ax = plt.subplots(1,1,figsize=(8,4))
+h[0j::hist.rebin(2), :, "top2_W"].plot(density=True, ax=ax)
+ax.legend(legend_list)
+ax.set_title("$\Delta R$ between W jet and top2 jet")
+fig.show()
 ```
 
 ```python
-#### mass plots ####
+#### delta phi histogram ####
+
+# binning
+deltaphi_low = 0.0
+deltaphi_high = 2*np.pi
+deltaphi_numbins = 100
 legend_list = ["All Matches Correct", "Some Matches Correct", "No Matches Correct"]
 
-bins = np.linspace(0,30,100)
-plt.hist(all_correct[:,8], histtype='step', bins=bins, density=True)
-plt.hist(some_correct[:,8], histtype='step', bins=bins, density=True)
-plt.hist(none_correct[:,8], histtype='step', bins=bins, density=True)
-plt.legend(legend_list)
-plt.xlabel("Combined mass of top1 jet and lepton [GeV]")
-plt.show()
+# define histogram
+h = hist.Hist(
+    hist.axis.Regular(deltaphi_numbins, deltaphi_low, deltaphi_high, name="deltaphi", label="$\Delta \phi$", flow=False),
+    hist.axis.StrCategory(legend_list, name="truthlabel", label="Truth Label"),
+    hist.axis.StrCategory(["top1_lepton","W_W","top2_W"], name="category", label="Category"),
+)
 
-bins = np.linspace(5,70,100)
-plt.hist(all_correct[:,9], histtype='step', bins=bins, density=True)
-plt.hist(some_correct[:,9], histtype='step', bins=bins, density=True)
-plt.hist(none_correct[:,9], histtype='step', bins=bins, density=True)
-plt.legend(legend_list)
-plt.xlabel("Combined mass of the two W jets [GeV]")
-plt.show()
+# fill histogram
+h.fill(deltaphi = all_correct[:,4], category="top1_lepton", truthlabel="All Matches Correct")
+h.fill(deltaphi = some_correct[:,4], category="top1_lepton", truthlabel="Some Matches Correct")
+h.fill(deltaphi = none_correct[:,4], category="top1_lepton", truthlabel="No Matches Correct")
+h.fill(deltaphi = all_correct[:,5], category="W_W", truthlabel="All Matches Correct")
+h.fill(deltaphi = some_correct[:,5], category="W_W", truthlabel="Some Matches Correct")
+h.fill(deltaphi = none_correct[:,5], category="W_W", truthlabel="No Matches Correct")
+h.fill(deltaphi = all_correct[:,6], category="top2_W", truthlabel="All Matches Correct")
+h.fill(deltaphi = some_correct[:,6], category="top2_W", truthlabel="Some Matches Correct")
+h.fill(deltaphi = none_correct[:,6], category="top2_W", truthlabel="No Matches Correct")
+h.fill(deltaphi = all_correct[:,7], category="top2_W", truthlabel="All Matches Correct")
+h.fill(deltaphi = some_correct[:,7], category="top2_W", truthlabel="Some Matches Correct")
+h.fill(deltaphi = none_correct[:,7], category="top2_W", truthlabel="No Matches Correct")
 
-bins = np.linspace(10,100,100)
-plt.hist(all_correct[:,10], histtype='step', bins=bins, density=True)
-plt.hist(some_correct[:,10], histtype='step', bins=bins, density=True)
-plt.hist(none_correct[:,10], histtype='step', bins=bins, density=True)
-plt.legend(legend_list)
-plt.xlabel("Combined mass of W jets and top2 jet [GeV]")
-plt.show()
+# make plots
+fig,ax = plt.subplots(1,1,figsize=(8,4))
+h[0j::hist.rebin(2), :, "top1_lepton"].plot(density=True, ax=ax)
+ax.legend(legend_list)
+ax.set_title("$\Delta \phi$ between top1 jet and lepton")
+fig.show()
+
+fig,ax = plt.subplots(1,1,figsize=(8,4))
+h[0j::hist.rebin(2), :, "W_W"].plot(density=True, ax=ax)
+ax.legend(legend_list)
+ax.set_title("$\Delta \phi$ between the two W jets")
+fig.show()
+
+fig,ax = plt.subplots(1,1,figsize=(8,4))
+h[0j::hist.rebin(2), :, "top2_W"].plot(density=True, ax=ax)
+ax.legend(legend_list)
+ax.set_title("$\Delta \phi$ between W jet and top2 jet")
+fig.show()
 ```
 
 ```python
-#### pT plots ####
+#### mass histogram ####
+
+# binning
+combinedmass_low = 0.0
+combinedmass_high = 100.0
+combinedmass_numbins = 200
 legend_list = ["All Matches Correct", "Some Matches Correct", "No Matches Correct"]
-bins = np.linspace(25,300,100)
 
-plt.hist(np.concatenate((all_correct[:,11],all_correct[:,12])), histtype='step', bins=bins, density=True)
-plt.hist(np.concatenate((some_correct[:,11],some_correct[:,12])), histtype='step', bins=bins, density=True)
-plt.hist(np.concatenate((none_correct[:,11],none_correct[:,12])), histtype='step', bins=bins, density=True)
-plt.legend(legend_list)
-plt.xlabel("Jet $p_T$ (W) [GeV]")
-plt.show()
+# define histogram
+h = hist.Hist(
+    hist.axis.Regular(combinedmass_numbins, combinedmass_low, combinedmass_high, 
+                      name="combinedmass", label="Combined Mass [GeV]", flow=False),
+    hist.axis.StrCategory(legend_list, name="truthlabel", label="Truth Label"),
+    hist.axis.StrCategory(["top1_lepton","W_W","top2_W_W"], name="category", label="Category"),
+)
 
-plt.hist(all_correct[:,13], histtype='step', bins=bins, density=True)
-plt.hist(some_correct[:,13], histtype='step', bins=bins, density=True)
-plt.hist(none_correct[:,13], histtype='step', bins=bins, density=True)
-plt.legend(legend_list)
-plt.xlabel("Jet $p_T$ (top2) [GeV]")
-plt.show()
+# fill histogram
+h.fill(combinedmass = all_correct[:,8], category="top1_lepton", truthlabel="All Matches Correct")
+h.fill(combinedmass = some_correct[:,8], category="top1_lepton", truthlabel="Some Matches Correct")
+h.fill(combinedmass = none_correct[:,8], category="top1_lepton", truthlabel="No Matches Correct")
+h.fill(combinedmass = all_correct[:,9], category="W_W", truthlabel="All Matches Correct")
+h.fill(combinedmass = some_correct[:,9], category="W_W", truthlabel="Some Matches Correct")
+h.fill(combinedmass = none_correct[:,9], category="W_W", truthlabel="No Matches Correct")
+h.fill(combinedmass = all_correct[:,10], category="top2_W_W", truthlabel="All Matches Correct")
+h.fill(combinedmass = some_correct[:,10], category="top2_W_W", truthlabel="Some Matches Correct")
+h.fill(combinedmass = none_correct[:,10], category="top2_W_W", truthlabel="No Matches Correct")
 
-plt.hist(all_correct[:,14], histtype='step', bins=bins, density=True)
-plt.hist(some_correct[:,14], histtype='step', bins=bins, density=True)
-plt.hist(none_correct[:,14], histtype='step', bins=bins, density=True)
-plt.legend(legend_list)
-plt.xlabel("Jet $p_T$ (top1) [GeV]")
-plt.show()
+# make plots
+fig,ax = plt.subplots(1,1,figsize=(8,4))
+h[:, :, "top1_lepton"].plot(density=True, ax=ax)
+ax.legend(legend_list)
+ax.set_title("Combined mass of top1 jet and lepton")
+ax.set_xlim([0,30])
+fig.show()
+
+fig,ax = plt.subplots(1,1,figsize=(8,4))
+h[:, :, "W_W"].plot(density=True, ax=ax)
+ax.legend(legend_list)
+ax.set_title("Combined mass of the two W jets")
+ax.set_xlim([0,60])
+fig.show()
+
+fig,ax = plt.subplots(1,1,figsize=(8,4))
+h[0j::hist.rebin(2), :, "top2_W_W"].plot(density=True, ax=ax)
+ax.legend(legend_list)
+ax.set_title("Combined mass of W jets and top2 jet")
+ax.set_xlim([10,80])
+fig.show()
 ```
 
 ```python
-#### jet mass plots ####
+#### pT histogram ####
+
+# binning
+pt_low = 25.0
+pt_high = 300.0
+pt_numbins = 100
 legend_list = ["All Matches Correct", "Some Matches Correct", "No Matches Correct"]
 
-bins = np.linspace(0,50,100)
-plt.hist(np.concatenate((all_correct[:,15],all_correct[:,16])), histtype='step', bins=bins, density=True)
-plt.hist(np.concatenate((some_correct[:,15],some_correct[:,16])), histtype='step', bins=bins, density=True)
-plt.hist(np.concatenate((none_correct[:,15],none_correct[:,16])), histtype='step', bins=bins, density=True)
-plt.legend(legend_list)
-plt.xlabel("Jet Mass (W) [GeV]")
-plt.show()
+# define histogram
+h = hist.Hist(
+    hist.axis.Regular(pt_numbins, pt_low, pt_high, 
+                      name="jetpt", label="Jet $p_T$ [GeV]", flow=False),
+    hist.axis.StrCategory(legend_list, name="truthlabel", label="Truth Label"),
+    hist.axis.StrCategory(["W","top1","top2"], name="category", label="Category"),
+)
 
-bins = np.linspace(0,50,100)
-plt.hist(all_correct[:,17], histtype='step', bins=bins, density=True)
-plt.hist(some_correct[:,17], histtype='step', bins=bins, density=True)
-plt.hist(none_correct[:,17], histtype='step', bins=bins, density=True)
-plt.legend(legend_list)
-plt.xlabel("Jet Mass (top2) [GeV]")
-plt.show()
+# fill histogram
+h.fill(jetpt = all_correct[:,11], category="W", truthlabel="All Matches Correct")
+h.fill(jetpt = some_correct[:,11], category="W", truthlabel="Some Matches Correct")
+h.fill(jetpt = none_correct[:,11], category="W", truthlabel="No Matches Correct")
+h.fill(jetpt = all_correct[:,12], category="W", truthlabel="All Matches Correct")
+h.fill(jetpt = some_correct[:,12], category="W", truthlabel="Some Matches Correct")
+h.fill(jetpt = none_correct[:,12], category="W", truthlabel="No Matches Correct")
+h.fill(jetpt = all_correct[:,13], category="top2", truthlabel="All Matches Correct")
+h.fill(jetpt = some_correct[:,13], category="top2", truthlabel="Some Matches Correct")
+h.fill(jetpt = none_correct[:,13], category="top2", truthlabel="No Matches Correct")
+h.fill(jetpt = all_correct[:,14], category="top1", truthlabel="All Matches Correct")
+h.fill(jetpt = some_correct[:,14], category="top1", truthlabel="Some Matches Correct")
+h.fill(jetpt = none_correct[:,14], category="top1", truthlabel="No Matches Correct")
 
-bins = np.linspace(0,50,100)
-plt.hist(all_correct[:,18], histtype='step', bins=bins, density=True)
-plt.hist(some_correct[:,18], histtype='step', bins=bins, density=True)
-plt.hist(none_correct[:,18], histtype='step', bins=bins, density=True)
-plt.legend(legend_list)
-plt.xlabel("Jet Mass (top1) [GeV]")
-plt.show()
+# make plots
+fig,ax = plt.subplots(1,1,figsize=(8,4))
+h[:, :, "W"].plot(density=True, ax=ax)
+ax.legend(legend_list)
+ax.set_title("W Jet $p_T$")
+ax.set_xlim([25,300])
+fig.show()
+
+fig,ax = plt.subplots(1,1,figsize=(8,4))
+h[:, :, "top2"].plot(density=True, ax=ax)
+ax.legend(legend_list)
+ax.set_title("top2 Jet $p_T$")
+ax.set_xlim([25,300])
+fig.show()
+
+fig,ax = plt.subplots(1,1,figsize=(8,4))
+h[:, :, "top1"].plot(density=True, ax=ax)
+ax.legend(legend_list)
+ax.set_title("top1 Jet $p_T$")
+ax.set_xlim([25,200])
+fig.show()
+```
+
+```python
+#### pT histogram ####
+
+# binning
+mass_low = 0.0
+mass_high = 50.0
+mass_numbins = 100
+legend_list = ["All Matches Correct", "Some Matches Correct", "No Matches Correct"]
+
+# define histogram
+h = hist.Hist(
+    hist.axis.Regular(mass_numbins, mass_low, mass_high, 
+                      name="jetmass", label="Jet Mass [GeV]", flow=False),
+    hist.axis.StrCategory(legend_list, name="truthlabel", label="Truth Label"),
+    hist.axis.StrCategory(["W","top1","top2"], name="category", label="Category"),
+)
+
+# fill histogram
+h.fill(jetmass = all_correct[:,15], category="W", truthlabel="All Matches Correct")
+h.fill(jetmass = some_correct[:,15], category="W", truthlabel="Some Matches Correct")
+h.fill(jetmass = none_correct[:,15], category="W", truthlabel="No Matches Correct")
+h.fill(jetmass = all_correct[:,16], category="W", truthlabel="All Matches Correct")
+h.fill(jetmass = some_correct[:,16], category="W", truthlabel="Some Matches Correct")
+h.fill(jetmass = none_correct[:,16], category="W", truthlabel="No Matches Correct")
+h.fill(jetmass = all_correct[:,17], category="top2", truthlabel="All Matches Correct")
+h.fill(jetmass = some_correct[:,17], category="top2", truthlabel="Some Matches Correct")
+h.fill(jetmass = none_correct[:,17], category="top2", truthlabel="No Matches Correct")
+h.fill(jetmass = all_correct[:,18], category="top1", truthlabel="All Matches Correct")
+h.fill(jetmass = some_correct[:,18], category="top1", truthlabel="Some Matches Correct")
+h.fill(jetmass = none_correct[:,18], category="top1", truthlabel="No Matches Correct")
+
+# make plots
+fig,ax = plt.subplots(1,1,figsize=(8,4))
+h[:, :, "W"].plot(density=True, ax=ax)
+ax.legend(legend_list)
+ax.set_title("W Jet Mass")
+# fig.show()
+
+fig,ax = plt.subplots(1,1,figsize=(8,4))
+h[:, :, "top2"].plot(density=True, ax=ax)
+ax.legend(legend_list)
+ax.set_title("top2 Jet Mass")
+fig.show()
+
+fig,ax = plt.subplots(1,1,figsize=(8,4))
+h[:, :, "top1"].plot(density=True, ax=ax)
+ax.legend(legend_list)
+ax.set_title("top1 Jet Mass")
+fig.show()
 ```
 
 # Model Optimization
+
+Greatly inspired by the workflow outlined in https://towardsdatascience.com/training-xgboost-with-mlflow-experiments-and-hyperopt-c0d3a4994ea6.
 
 ```python
 import xgboost as xgb

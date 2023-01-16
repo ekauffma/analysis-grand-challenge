@@ -66,7 +66,6 @@ logging.getLogger("cabinetry").setLevel(logging.INFO)
 
 # input files per process, set to e.g. 10 (smaller number = faster, want to use larger number for training)
 N_FILES_MAX_PER_SAMPLE = 10
-
 # set to "dask" for DaskExecutor, "futures" for FuturesExecutor
 EXEC = "dask"
 
@@ -256,7 +255,7 @@ def get_training_set(jets, electrons, muons, labels):
     labels = truth_labels.reshape((truth_labels.shape[0]*truth_labels.shape[1],1))
     features = features.reshape((features.shape[0]*features.shape[1],features.shape[2]))    
         
-    return features, labels
+    return features, labels, which_combination
 ```
 
 ### Defining a `coffea` Processor
@@ -320,11 +319,12 @@ class JetClassifier(processor_base):
                                                              selected_genpart_region)
             
             # calculate features and labels
-            features, labels = get_training_set(jets, electrons, muons, labels)
+            features, labels, which_combination = get_training_set(jets, electrons, muons, labels)
     
         output = {"nevents": {events.metadata["dataset"]: len(events)},
                   "features": {events.metadata["dataset"]: features.tolist()},
-                  "labels": {events.metadata["dataset"]: labels.tolist()}}
+                  "labels": {events.metadata["dataset"]: labels.tolist()},
+                  "which_combination": {events.metadata["dataset"]: which_combination},}
             
         return output
         
@@ -374,10 +374,27 @@ output, metrics = run(fileset,
 ```
 
 ```python
+import pickle
+pickle.dump(output, open("output.p", "wb"))
+```
+
+```python
 # grab features and labels and convert to np array
 features = np.array(output['features']['ttbar__nominal'])
 labels = np.array(output['labels']['ttbar__nominal'])
 labels = labels.reshape((len(labels),))
+which_combination = np.array(output['which_combination']['ttbar__nominal'])[:,1]
+```
+
+```python
+which_combination
+```
+
+```python
+# investigate labels
+print(len(labels))
+print(len(labels)/12)
+print(sum(labels==1))
 ```
 
 The key for the labeling scheme is as follows
@@ -681,27 +698,61 @@ from sklearn.metrics import (
 features = np.array(output['features']['ttbar__nominal'])
 labels = np.array(output['labels']['ttbar__nominal'])
 labels = labels.reshape((len(labels),))
+which_combination = np.array(output['which_combination']['ttbar__nominal'])[:,1]
 
 # only consider combinations that are 100% correct or 0% correct
-features = features[(labels==1) | (labels==0)]
-labels = labels[(labels==1) | (labels==0)]
+# features = features[(labels==1) | (labels==0)]
+# labels = labels[(labels==1) | (labels==0)]
+
+# consider all combination (partially correct is same as 0% correct for training)
+labels[labels==-1]=0
 ```
 
 ```python
 ### separate data into train/val/testr ###
 
 RANDOM_SEED = 5
-TRAIN_RATIO = 0.9 # fraction of data to use for training
+TRAIN_RATIO = 0.9 # approx. fraction of data to use for training (round to nearest multiple of 12)
+TRAIN_SIZE = int(TRAIN_RATIO*(features.shape[0]/12))*12
 
-features_train_and_val, features_test, labels_train_and_val, labels_test = train_test_split(features, 
-                                                                                            labels, 
-                                                                                            test_size=1-TRAIN_RATIO, 
+features_unflattened = features.reshape((int(features.shape[0]/12),12,19))
+labels_unflattened = labels.reshape((int(features.shape[0]/12),12))
+
+features_train_and_val, features_test, labels_train_and_val, labels_test = train_test_split(features_unflattened, 
+                                                                                            labels_unflattened, 
+                                                                                            train_size=TRAIN_RATIO, 
                                                                                             random_state=RANDOM_SEED)
 
+print("features_train_and_val.shape = ", features_train_and_val.shape)
+print("labels_train_and_val.shape = ", labels_train_and_val.shape)
+print("features_test.shape = ", features_test.shape)
+print("labels_test.shape = ", labels_test.shape)
+
+which_combination_test = np.where(labels_test==1)[1]
+features_test = features_test.reshape((12*features_test.shape[0],19))
+labels_test = labels_test.reshape((12*labels_test.shape[0],))
+
+TRAIN_RATIO = 0.5
 features_train, features_val, labels_train, labels_val = train_test_split(features_train_and_val, 
                                                                           labels_train_and_val, 
-                                                                          stratify=labels_train_and_val, # makes sure sig/bkg is balanced since we have more bkg as sig
+                                                                          train_size=TRAIN_RATIO,
+                                                                          # stratify=labels_train_and_val, # makes sure sig/bkg is balanced since we have more bkg as sig
                                                                           random_state=RANDOM_SEED)
+
+
+print()
+print("features_train.shape = ", features_train.shape)
+print("labels_train.shape = ", labels_train.shape)
+print("features_val.shape = ", features_val.shape)
+print("labels_val.shape = ", labels_val.shape)
+
+which_combination_train = np.where(labels_train==1)[1]
+features_train = features_train.reshape((12*features_train.shape[0],19))
+labels_train = labels_train.reshape((12*labels_train.shape[0],))
+
+which_combination_val = np.where(labels_val==1)[1]
+features_val = features_val.reshape((12*features_val.shape[0],19))
+labels_val = labels_val.reshape((12*labels_val.shape[0],))
 ```
 
 ```python
@@ -725,8 +776,22 @@ trial_params = {
     'gamma': hp.loguniform('gamma', -10, 10), # minimum loss reduction for a partition to occur
     'booster': 'gbtree', # use a boosted decision tree
     'random_state': RANDOM_SEED, # use same model initialization for each trial
-    'eval_metric': 'auc', # hyperopt will attempt to maximize AUC
+    # 'eval_metric': 'auc', # hyperopt will attempt to maximize AUC
                }
+```
+
+```python
+permutation_labels = np.array([[24,24,6,-6],[24,24,-6,6],[24,6,24,-6],[24,-6,24,6],
+                               [24,6,-6,24],[24,-6,6,24],[6,24,24,-6],[-6,24,24,6],
+                               [6,24,-6,24],[-6,24,6,24],[6,-6,24,24],[-6,6,24,24]])
+```
+
+```python
+evaluation_matrix = np.zeros((12,12))
+for i in range(len(permutation_labels)):
+    for j in range(len(permutation_labels)):
+        evaluation_matrix[i,j]=sum(np.equal(permutation_labels[i,:],permutation_labels[j,:]))/4
+print(evaluation_matrix)
 ```
 
 ```python
@@ -734,13 +799,13 @@ trial_params = {
 def train_and_evaluate(params):
     model = xgb.XGBClassifier(**params) # define model with current parameters
     model = model.fit(features_train, labels_train) # train model
-
+    
     # predicting train set and validation set
     train_predicted = model.predict(features_train)
     train_predicted_prob = model.predict_proba(features_train)[:, 1]
     val_predicted = model.predict(features_val)
     val_predicted_prob = model.predict_proba(features_val)[:, 1]
-
+    
     # model metrics to track
     metric_names = ['accuracy', 'precision', 'recall', 'f1', 'aucroc']
         
@@ -763,8 +828,19 @@ def train_and_evaluate(params):
         'AUCROC': roc_auc_score(labels_val, val_predicted_prob),
     }
     val_metrics_values = list(val_metrics.values())
+    
+    val_predicted_prob = val_predicted_prob.reshape((int(len(val_predicted_prob)/12),12))
+    val_predicted_combination = np.argmax(val_predicted_prob,axis=1)
+    
+    scores = np.zeros(len(which_combination_val))
+    zipped = list(zip(which_combination_val.tolist(), val_predicted_combination.tolist()))
+    for i in range(len(which_combination_val)):
+        scores[i] = evaluation_matrix[zipped[i]]
+        
+    score = -sum(scores)/len(scores)
 
-    return {'status': STATUS_OK, 'loss': -1*val_metrics['AUCROC']}
+    return {'status': STATUS_OK, 'loss': score}
+    # return {'status': STATUS_OK, 'loss': -1*val_metrics['AUCROC']}
 ```
 
 ```python
@@ -832,6 +908,63 @@ print("Validation AUC = ", val_aucroc)
 ```
 
 ```python
+val_predicted_prob = val_predicted_prob.reshape((int(len(val_predicted_prob)/12),12))
+val_predicted_combination = np.argmax(val_predicted_prob,axis=1)
+    
+scores = np.zeros(len(which_combination_val))
+zipped = list(zip(which_combination_val.tolist(), val_predicted_combination.tolist()))
+for i in range(len(which_combination_val)):
+    scores[i] = evaluation_matrix[zipped[i]]
+        
+score = -sum(scores)/len(scores)
+print("Validation Jet Score = ", score)
+
+train_predicted_prob = train_predicted_prob.reshape((int(len(train_predicted_prob)/12),12))
+train_predicted_combination = np.argmax(train_predicted_prob,axis=1)
+    
+scores = np.zeros(len(which_combination_train))
+zipped = list(zip(which_combination_train.tolist(), train_predicted_combination.tolist()))
+for i in range(len(which_combination_train)):
+    scores[i] = evaluation_matrix[zipped[i]]
+        
+score = -sum(scores)/len(scores)
+print("Training Jet Score = ", score)
+```
+
+```python
+# make predictions
+test_predicted = model.predict(features_test)
+test_predicted_prob = model.predict_proba(features_test)[:, 1]
+```
+
+```python
+test_accuracy = accuracy_score(labels_test, test_predicted).round(3)
+test_precision = precision_score(labels_test, test_predicted).round(3)
+test_recall = recall_score(labels_test, test_predicted).round(3)
+test_f1 = f1_score(labels_test, test_predicted).round(3)
+test_aucroc = roc_auc_score(labels_test, test_predicted_prob).round(3)
+print("Test Accuracy = ", test_accuracy)
+print("Test Precision = ", test_precision)
+print("Test Recall = ", test_recall)
+print("Test f1 = ", test_f1)
+print("Test AUC = ", test_aucroc)
+```
+
+```python
+test_predicted_prob = test_predicted_prob.reshape((int(len(test_predicted_prob)/12),12))
+test_predicted_combination = np.argmax(test_predicted_prob,axis=1)
+    
+scores = np.zeros(len(which_combination_test))
+zipped = list(zip(which_combination_test.tolist(), test_predicted_combination.tolist()))
+for i in range(len(which_combination_test)):
+    scores[i] = evaluation_matrix[zipped[i]]
+        
+score = sum(scores)/len(scores)
+print("Test Jet Score = ", score)
+print("Random Assignment Jet Score = ", 0.375)
+```
+
+```python
 # save model to json. this file can be used with the FIL backend in nvidia-triton!
-model.save_model("models/model_xgb.json")
+model.save_model("models/model_allcombinations_xgb.json")
 ```

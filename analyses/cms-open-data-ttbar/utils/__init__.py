@@ -8,8 +8,18 @@ import uproot
 
 from func_adl_servicex import ServiceXSourceUpROOT
 from func_adl import ObjectStream
-from coffea.processor import servicex
 from servicex import ServiceXDataset
+
+import vector; vector.register_awkward()
+
+import awkward as ak
+import cabinetry
+from coffea import processor
+from coffea.processor import servicex
+from coffea.nanoevents import transforms
+from coffea.nanoevents.methods import base, vector
+from coffea.nanoevents.schemas.base import BaseSchema, zip_forms
+import numpy as np
 
 
 def get_client(af="coffea_casa"):
@@ -178,3 +188,5 @@ async def produce_all_histograms(fileset, query, analysis_processor, use_dask=Fa
     all_histograms = sum([h["hist"] for h in all_histogram_dicts])
 
     return all_histograms
+
+

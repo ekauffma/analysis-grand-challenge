@@ -65,7 +65,7 @@ logging.getLogger("cabinetry").setLevel(logging.INFO)
 ### GLOBAL CONFIGURATION
 
 # input files per process, set to e.g. 10 (smaller number = faster, want to use larger number for training)
-N_FILES_MAX_PER_SAMPLE = 10
+N_FILES_MAX_PER_SAMPLE = 20
 # set to "dask" for DaskExecutor, "futures" for FuturesExecutor
 EXEC = "dask"
 
@@ -165,11 +165,18 @@ def get_training_set(jets, electrons, muons, labels):
         features, labels (flattened to remove event level)
     '''
     
-    # permutations of jets to consider
-    permutation_ind = np.array([[0,1,2,3],[0,1,3,2],[0,2,1,3],[0,3,1,2],
-                                [0,2,3,1],[0,3,2,1],[2,0,1,3],[3,0,1,2],
-                                [2,0,3,1],[3,0,2,1],[2,3,0,1],[3,2,0,1]])
-    # corresponding jet labels to above permutations
+#     # permutations of jets to consider
+#     permutation_ind = np.array([[0,1,2,3],[0,1,3,2],[0,2,1,3],[0,3,1,2],
+#                                 [0,2,3,1],[0,3,2,1],[2,0,1,3],[3,0,1,2],
+#                                 [2,0,3,1],[3,0,2,1],[2,3,0,1],[3,2,0,1]])
+#     # corresponding jet labels to above permutations
+#     permutation_labels = np.array([[24,24,6,-6],[24,24,-6,6],[24,6,24,-6],[24,-6,24,6],
+#                                    [24,6,-6,24],[24,-6,6,24],[6,24,24,-6],[-6,24,24,6],
+#                                    [6,24,-6,24],[-6,24,6,24],[6,-6,24,24],[-6,6,24,24]])
+
+    permutation_ind = np.array([[0,1,2,3],[0,1,3,2],[0,2,1,3],[0,2,3,1],
+                                [0,3,1,2],[0,3,2,1],[1,2,0,3],[1,2,3,0],
+                                [1,3,0,2],[1,3,2,0],[2,3,0,1],[2,3,1,0]])
     permutation_labels = np.array([[24,24,6,-6],[24,24,-6,6],[24,6,24,-6],[24,-6,24,6],
                                    [24,6,-6,24],[24,-6,6,24],[6,24,24,-6],[-6,24,24,6],
                                    [6,24,-6,24],[-6,24,6,24],[6,-6,24,24],[-6,6,24,24]])
@@ -354,7 +361,7 @@ fileset
 
 ### Execute the data delivery pipeline
 
-```python
+```python tags=[]
 schema = NanoAODSchema
 
 if EXEC == "futures":
@@ -375,7 +382,12 @@ output, metrics = run(fileset,
 
 ```python
 import pickle
-pickle.dump(output, open("output.p", "wb"))
+pickle.dump(output, open("output_0.p", "wb"))
+```
+
+```python
+import pickle
+output = pickle.load(open("output_0.p", "rb"))
 ```
 
 ```python
@@ -384,10 +396,6 @@ features = np.array(output['features']['ttbar__nominal'])
 labels = np.array(output['labels']['ttbar__nominal'])
 labels = labels.reshape((len(labels),))
 which_combination = np.array(output['which_combination']['ttbar__nominal'])[:,1]
-```
-
-```python
-which_combination
 ```
 
 ```python
@@ -732,7 +740,7 @@ which_combination_test = np.where(labels_test==1)[1]
 features_test = features_test.reshape((12*features_test.shape[0],19))
 labels_test = labels_test.reshape((12*labels_test.shape[0],))
 
-TRAIN_RATIO = 0.5
+TRAIN_RATIO = 0.8
 features_train, features_val, labels_train, labels_val = train_test_split(features_train_and_val, 
                                                                           labels_train_and_val, 
                                                                           train_size=TRAIN_RATIO,
@@ -852,7 +860,7 @@ best_parameters = fmin(
     space=trial_params,
     algo=tpe.suggest,
     trials=trials,
-    max_evals=50 # how many trials to run
+    max_evals=10 # how many trials to run
                       )
 ```
 
@@ -967,4 +975,8 @@ print("Random Assignment Jet Score = ", 0.375)
 ```python
 # save model to json. this file can be used with the FIL backend in nvidia-triton!
 model.save_model("models/model_allcombinations_xgb.json")
+```
+
+```python
+
 ```

@@ -99,7 +99,7 @@ When setting the `PIPELINE` variable below to `"servicex_databinder"`, the `N_FI
 ### GLOBAL CONFIGURATION
 
 # input files per process, set to e.g. 10 (smaller number = faster)
-N_FILES_MAX_PER_SAMPLE = 5
+N_FILES_MAX_PER_SAMPLE = 1
 
 # pipeline to use:
 # - "coffea" for pure coffea setup
@@ -119,7 +119,7 @@ AF = "coffea_casa"
 ### BENCHMARKING-SPECIFIC SETTINGS
 
 # chunk size to use
-CHUNKSIZE = 500_000
+CHUNKSIZE = 50_000 #500_000
 
 # metadata to propagate through to metrics
 AF_NAME = "coffea_casa"  # "ssl-dev" allows for the switch to local data on /data
@@ -136,12 +136,39 @@ DISABLE_PROCESSING = False
 # acceptable values are 2.7, 4, 15, 25, 50 (corresponding to % of file read), 2.7% corresponds to the standard branches used in the notebook
 IO_FILE_PERCENT = 2.7
 
-MODEL = "models/model_xgb.json"
+# ML options
+MAX_N_JETS = 4 # maximum number of jets to consider in reconstruction BDT
+
+MODEL = "models/model_allcombinations_xgb.json" # BDT json
+```
+
+```python
+permutations_dict = {}
+for n in range(4,MAX_N_JETS+1):
+    test = ak.Array(range(n))
+    unzipped = ak.unzip(ak.argcartesian([test]*4,axis=0))
+
+    combos = ak.combinations(ak.Array(range(4)), 2, axis=0)
+    different = unzipped[combos[0]["0"]]!=unzipped[combos[0]["1"]]
+    for i in range(1,len(combos)):
+        different = different & (unzipped[combos[i]["0"]]!=unzipped[combos[i]["1"]])
+
+    permutations = ak.zip([test[unzipped[i][different]] for i in range(len(unzipped))],
+                          depth_limit=1).tolist()
+
+
+    permutations = ak.concatenate([test[unzipped[i][different]][..., np.newaxis] 
+                                   for i in range(len(unzipped))], 
+                                  axis=1).to_list()
+
+    print("number of permutations for n=",n,": ", len(permutations))
+    
+    permutations_dict[n] = permutations
 ```
 
 ```python
 ## get inputs to BDT
-def get_features(jets, electrons, muons):
+def get_features(jets, electrons, muons, permutations_dict):
     '''
     Calculate features for each of the 12 combinations per event
     
@@ -149,74 +176,99 @@ def get_features(jets, electrons, muons):
         jets: selected jets
         electrons: selected electrons
         muons: selected muons
+        permutations_dict: which permutations to consider for each number of jets in an event
     
     Returns:
         features (flattened to remove event level)
     '''
     
-    # permutations of jets to consider
-    permutation_ind = np.array([[0,1,2,3],[0,1,3,2],[0,2,1,3],[0,3,1,2],
-                                [0,2,3,1],[0,3,2,1],[2,0,1,3],[3,0,1,2],
-                                [2,0,3,1],[3,0,2,1],[2,3,0,1],[3,2,0,1]])
+    # calculate number of jets in each event
+    njet = ak.num(jets).to_numpy()
+    # don't consider every jet for events with high jet multiplicity
+    njet[njet>max(permutations_dict.keys())] = max(permutations_dict.keys())
+    # create awkward array of permutation indices
+    perms = ak.Array([permutations_dict[n] for n in njet])
+    
     
     #### calculate features ####
     
-    features = np.zeros((len(jets),12,19))
-                        
     # grab lepton info
-    lepton_eta = (ak.sum(electrons.eta,axis=-1) + ak.sum(muons.eta,axis=-1)).to_numpy().reshape((len(jets),1))
-    lepton_phi = (ak.sum(electrons.phi,axis=-1) + ak.sum(muons.phi,axis=-1)).to_numpy().reshape((len(jets),1))
-    lepton_mass = (ak.sum(electrons.mass,axis=-1) + ak.sum(muons.mass,axis=-1)).to_numpy().reshape((len(jets),1))
-    
+    lepton_eta = (ak.sum(electrons.eta,axis=-1) + ak.sum(muons.eta,axis=-1))
+    lepton_phi = (ak.sum(electrons.phi,axis=-1) + ak.sum(muons.phi,axis=-1))
+    lepton_mass = (ak.sum(electrons.mass,axis=-1) + ak.sum(muons.mass,axis=-1))
+
     # delta R between top1 and lepton
-    features[:,:,0] = np.sqrt((lepton_eta - jets[:,permutation_ind[:,3]].eta)**2 + 
-                              (lepton_phi - jets[:,permutation_ind[:,3]].phi)**2)
+    deltar_0 = np.sqrt((lepton_eta - jets[perms[...,3]].eta)**2 + 
+                       (lepton_phi - jets[perms[...,3]].phi)**2)
 
     # delta R between the two W
-    features[:,:,1] = np.sqrt((jets[:,permutation_ind[:,0]].eta - jets[:,permutation_ind[:,1]].eta)**2 + 
-                              (jets[:,permutation_ind[:,0]].phi - jets[:,permutation_ind[:,1]].phi)**2)
+    deltar_1 = np.sqrt((jets[perms[...,0]].eta - jets[perms[...,1]].eta)**2 + 
+                       (jets[perms[...,0]].phi - jets[perms[...,1]].phi)**2)
 
     # delta R between W and top2
-    features[:,:,2] = np.sqrt((jets[:,permutation_ind[:,0]].eta - jets[:,permutation_ind[:,2]].eta)**2 + 
-                              (jets[:,permutation_ind[:,0]].phi - jets[:,permutation_ind[:,2]].phi)**2)
-    features[:,:,3] = np.sqrt((jets[:,permutation_ind[:,0]].eta - jets[:,permutation_ind[:,2]].eta)**2 + 
-                              (jets[:,permutation_ind[:,1]].phi - jets[:,permutation_ind[:,2]].phi)**2)
+    deltar_2 = np.sqrt((jets[perms[...,0]].eta - jets[perms[...,2]].eta)**2 + 
+                       (jets[perms[...,0]].phi - jets[perms[...,2]].phi)**2)
+    deltar_3 = np.sqrt((jets[perms[...,1]].eta - jets[perms[...,2]].eta)**2 + 
+                       (jets[perms[...,1]].phi - jets[perms[...,2]].phi)**2)
 
     # delta phi between top1 and lepton
-    features[:,:,4] = np.abs(lepton_phi - jets[:,permutation_ind[:,3]].phi)
+    deltaphi_0 = np.abs(lepton_phi - jets[perms[...,3]].phi)
 
     # delta phi between the two W
-    features[:,:,5] = np.abs(jets[:,permutation_ind[:,0]].phi - jets[:,permutation_ind[:,1]].phi)
+    deltaphi_1 = np.abs(jets[perms[...,0]].phi - jets[perms[...,1]].phi)
 
     # delta phi between W and top2
-    features[:,:,6] = np.abs(jets[:,permutation_ind[:,0]].phi - jets[:,permutation_ind[:,2]].phi)
-    features[:,:,7] = np.abs(jets[:,permutation_ind[:,1]].phi - jets[:,permutation_ind[:,2]].phi)
+    deltaphi_2 = np.abs(jets[perms[...,0]].phi - jets[perms[...,2]].phi)
+    deltaphi_3 = np.abs(jets[perms[...,1]].phi - jets[perms[...,2]].phi)
 
     # combined mass of top1 and lepton
-    features[:,:,8] = lepton_mass + jets[:,permutation_ind[:,3]].mass
+    combinedmass_0 = lepton_mass + jets[perms[...,3]].mass
 
     # combined mass of W
-    features[:,:,9] = jets[:,permutation_ind[:,0]].mass + jets[:,permutation_ind[:,1]].mass
+    combinedmass_1 = jets[perms[...,0]].mass + jets[perms[...,1]].mass
 
     # combined mass of W and top2
-    features[:,:,10] = jets[:,permutation_ind[:,0]].mass + jets[:,permutation_ind[:,1]].mass + jets[:,permutation_ind[:,2]].mass
+    combinedmass_2 = jets[perms[...,0]].mass + jets[perms[...,1]].mass + jets[perms[...,2]].mass
 
-    # pt of every jet
-    features[:,:,11] = jets[:,permutation_ind[:,0]].pt
-    features[:,:,12] = jets[:,permutation_ind[:,1]].pt
-    features[:,:,13] = jets[:,permutation_ind[:,2]].pt
-    features[:,:,14] = jets[:,permutation_ind[:,3]].pt
+    # # pt of every jet
+    jetpt_0 = jets[perms[...,0]].pt
+    jetpt_1 = jets[perms[...,1]].pt
+    jetpt_2 = jets[perms[...,2]].pt
+    jetpt_3 = jets[perms[...,3]].pt
 
-    # mass of every jet
-    features[:,:,15] = jets[:,permutation_ind[:,0]].mass
-    features[:,:,16] = jets[:,permutation_ind[:,1]].mass
-    features[:,:,17] = jets[:,permutation_ind[:,2]].mass
-    features[:,:,18] = jets[:,permutation_ind[:,3]].mass
+    # # mass of every jet
+    jetmass_0 = jets[perms[...,0]].mass
+    jetmass_1 = jets[perms[...,1]].mass
+    jetmass_2 = jets[perms[...,2]].mass
+    jetmass_3 = jets[perms[...,3]].mass
 
-    #### flatten to combinations (easy to unflatten since each event always has 12 combinations) ####
-    features = features.reshape((features.shape[0]*features.shape[1],features.shape[2]))    
+    features = ak.concatenate([deltar_0[..., np.newaxis],
+                               deltar_1[..., np.newaxis],
+                               deltar_2[..., np.newaxis],
+                               deltar_3[..., np.newaxis],
+                               deltaphi_0[..., np.newaxis],
+                               deltaphi_1[..., np.newaxis],
+                               deltaphi_2[..., np.newaxis],
+                               deltaphi_3[..., np.newaxis],
+                               combinedmass_0[..., np.newaxis],
+                               combinedmass_1[..., np.newaxis],
+                               combinedmass_2[..., np.newaxis],
+                               jetpt_0[..., np.newaxis],
+                               jetpt_1[..., np.newaxis],
+                               jetpt_2[..., np.newaxis],
+                               jetpt_3[..., np.newaxis],
+                               jetmass_0[..., np.newaxis],
+                               jetmass_1[..., np.newaxis],
+                               jetmass_2[..., np.newaxis],
+                               jetmass_3[..., np.newaxis]], 
+                              axis=2)
+
+    # keep counts to unflatten
+    perm_counts = ak.num(features)
+    # flatten features
+    features = ak.flatten(features, axis=1)    
         
-    return features
+    return features, perm_counts
 ```
 
 ### Defining our `coffea` Processor
@@ -250,7 +302,7 @@ def jet_pt_resolution(pt):
 
 
 class TtbarAnalysis(processor_base):
-    def __init__(self, disable_processing, io_file_percent):
+    def __init__(self, disable_processing, io_file_percent, permutations_dict, model):
         num_bins = 25
         bin_low = 50
         bin_high = 550
@@ -258,6 +310,8 @@ class TtbarAnalysis(processor_base):
         label = "observable [GeV]"
         self.hist = (
             hist.Hist.new.Reg(num_bins, bin_low, bin_high, name=name, label=label)
+            .Reg(num_bins, 0, 2*np.pi, overflow=False, underflow=False, 
+                 name="deltaR", label="$\Delta R$ between two W jets")
             .StrCat(["4j1b", "4j2b"], name="region", label="Region")
             .StrCat([], name="process", label="Process", growth=True)
             .StrCat([], name="variation", label="Systematic variation", growth=True)
@@ -265,6 +319,8 @@ class TtbarAnalysis(processor_base):
         )
         self.disable_processing = disable_processing
         self.io_file_percent = io_file_percent
+        self.permutations_dict = permutations_dict
+        self.model = model
 
     def only_do_IO(self, events):
         # standard AGC branches cover 2.7% of the data
@@ -373,72 +429,110 @@ class TtbarAnalysis(processor_base):
             for region in ["4j1b", "4j2b"]:
                 # further filtering: 4j1b CR with single b-tag, 4j2b SR with two or more tags
                 if region == "4j1b":
+                    
                     region_filter = ak.sum(selected_jets.btagCSVV2 >= B_TAG_THRESHOLD, axis=1) == 1
+                    
                     selected_jets_region = selected_jets[region_filter]
+                    selected_electrons_region = selected_electrons[region_filter]
+                    selected_muons_region = selected_muons[region_filter]
+                    
                     # use HT (scalar sum of jet pT) as observable
-                    pt_var_modifier = (
-                        events[event_filters][region_filter][pt_var]
-                        if "res" not in pt_var
-                        else events[pt_var][jet_filter][event_filters][region_filter]
-                    )
-                    observable = ak.sum(selected_jets_region.pt * pt_var_modifier, axis=-1)
+                    # pt_var_modifier = (
+                    #     events[event_filters][region_filter][pt_var]
+                    #     if "res" not in pt_var
+                    #     else events[pt_var][jet_filter][event_filters][region_filter]
+                    # )
+                    # observable = ak.sum(selected_jets_region.pt * pt_var_modifier, axis=-1)
+                    
+                    # ML component
+                    features, perm_counts = get_features(selected_jets_region, 
+                                                         selected_electrons_region, 
+                                                         selected_muons_region, 
+                                                         self.permutations_dict)
+                    BDT_results = ak.unflatten(self.model.predict_proba(features)[:, 1], perm_counts)
+                    features_unflattened = ak.unflatten(features, perm_counts)
+                    # # which_combination = np.argmax(BDT_results,axis=1)
+                    # chosen = ak.unflatten(features, perm_counts)[which_combination]
+                    
+                    #ML_observable = ak.unflatten(features, perm_counts)[which_combination,5]
+                    # ML_observable = observable
 
                 elif region == "4j2b":
                     region_filter = ak.sum(selected_jets.btagCSVV2 > B_TAG_THRESHOLD, axis=1) >= 2
+                    
                     selected_jets_region = selected_jets[region_filter]
+                    selected_electrons_region = selected_electrons[region_filter]
+                    selected_muons_region = selected_muons[region_filter]
 
                     # reconstruct hadronic top as bjj system with largest pT
                     # the jet energy scale / resolution effect is not propagated to this observable at the moment
-                    trijet = ak.combinations(selected_jets_region, 3, fields=["j1", "j2", "j3"])  # trijet candidates
-                    trijet["p4"] = trijet.j1 + trijet.j2 + trijet.j3  # calculate four-momentum of tri-jet system
-                    trijet["max_btag"] = np.maximum(trijet.j1.btagCSVV2, np.maximum(trijet.j2.btagCSVV2, trijet.j3.btagCSVV2))
-                    trijet = trijet[trijet.max_btag > B_TAG_THRESHOLD]  # at least one-btag in trijet candidates
-                    # pick trijet candidate with largest pT and calculate mass of system
-                    trijet_mass = trijet["p4"][ak.argmax(trijet.p4.pt, axis=1, keepdims=True)].mass
-                    observable = ak.flatten(trijet_mass)
+                    # trijet = ak.combinations(selected_jets_region, 3, fields=["j1", "j2", "j3"])  # trijet candidates
+                    # trijet["p4"] = trijet.j1 + trijet.j2 + trijet.j3  # calculate four-momentum of tri-jet system
+                    # trijet["max_btag"] = np.maximum(trijet.j1.btagCSVV2, np.maximum(trijet.j2.btagCSVV2, trijet.j3.btagCSVV2))
+                    # trijet = trijet[trijet.max_btag > B_TAG_THRESHOLD]  # at least one-btag in trijet candidates
+                    # # pick trijet candidate with largest pT and calculate mass of system
+                    # trijet_mass = trijet["p4"][ak.argmax(trijet.p4.pt, axis=1, keepdims=True)].mass
+                    # observable = ak.flatten(trijet_mass)
+                    
+                    # ML component
+                    features, perm_counts = get_features(selected_jets_region, 
+                                                         selected_electrons_region, 
+                                                         selected_muons_region, 
+                                                         self.permutations_dict)
+                    
+                    BDT_results = ak.unflatten(self.model.predict_proba(features)[:, 1], perm_counts)
+                    features_unflattened = ak.unflatten(features, perm_counts)
+                    #which_combination = np.argmax(BDT_results,axis=1)
+                    #chosen = ak.unflatten(features, perm_counts)[which_combination]
+                    
+                    #ML_observable = ak.unflatten(features, perm_counts)[which_combination,5]
+                    # ML_observable = observable
 
                 ### histogram filling
-                if pt_var == "pt_nominal":
-                    # nominal pT, but including 2-point systematics
-                    histogram.fill(
-                            observable=observable, region=region, process=process,
-                            variation=variation, weight=xsec_weight
-                        )
+#                 if pt_var == "pt_nominal":
+#                     # nominal pT, but including 2-point systematics
+#                     histogram.fill(
+#                             observable=observable, deltaR = ML_observable, region=region, process=process,
+#                             variation=variation, weight=xsec_weight
+#                         )
 
-                    if variation == "nominal":
-                        # also fill weight-based variations for all nominal samples
-                        for weight_name in events.systematics.fields:
-                            for direction in ["up", "down"]:
-                                # extract the weight variations and apply all event & region filters
-                                weight_variation = events.systematics[weight_name][direction][
-                                    f"weight_{weight_name}"][event_filters][region_filter]
-                                # fill histograms
-                                histogram.fill(
-                                    observable=observable, region=region, process=process,
-                                    variation=f"{weight_name}_{direction}", weight=xsec_weight*weight_variation
-                                )
+#                     if variation == "nominal":
+#                         # also fill weight-based variations for all nominal samples
+#                         for weight_name in events.systematics.fields:
+#                             for direction in ["up", "down"]:
+#                                 # extract the weight variations and apply all event & region filters
+#                                 weight_variation = events.systematics[weight_name][direction][
+#                                     f"weight_{weight_name}"][event_filters][region_filter]
+#                                 # fill histograms
+#                                 histogram.fill(
+#                                     observable=observable, deltaR = ML_observable, region=region, process=process,
+#                                     variation=f"{weight_name}_{direction}", weight=xsec_weight*weight_variation
+#                                 )
 
-                        # calculate additional systematics: b-tagging variations
-                        for i_var, weight_name in enumerate([f"btag_var_{i}" for i in range(4)]):
-                            for i_dir, direction in enumerate(["up", "down"]):
-                                # create systematic variations that depend on object properties (here: jet pT)
-                                if len(observable):
-                                    weight_variation = btag_weight_variation(i_var, selected_jets_region.pt)[:, i_dir]
-                                else:
-                                    weight_variation = 1 # no events selected
-                                histogram.fill(
-                                    observable=observable, region=region, process=process,
-                                    variation=f"{weight_name}_{direction}", weight=xsec_weight*weight_variation
-                                )
+#                         # calculate additional systematics: b-tagging variations
+#                         for i_var, weight_name in enumerate([f"btag_var_{i}" for i in range(4)]):
+#                             for i_dir, direction in enumerate(["up", "down"]):
+#                                 # create systematic variations that depend on object properties (here: jet pT)
+#                                 if len(observable):
+#                                     weight_variation = btag_weight_variation(i_var, selected_jets_region.pt)[:, i_dir]
+#                                 else:
+#                                     weight_variation = 1 # no events selected
+#                                 histogram.fill(
+#                                     observable=observable, deltaR = ML_observable, region=region, process=process,
+#                                     variation=f"{weight_name}_{direction}", weight=xsec_weight*weight_variation
+#                                 )
 
-                elif variation == "nominal":
-                    # pT variations for nominal samples
-                    histogram.fill(
-                            observable=observable, region=region, process=process,
-                            variation=pt_var, weight=xsec_weight
-                        )
+#                 elif variation == "nominal":
+#                     # pT variations for nominal samples
+#                     histogram.fill(
+#                             observable=observable, deltaR = ML_observable, region=region, process=process,
+#                             variation=pt_var, weight=xsec_weight
+#                         )
 
-        output = {"nevents": {events.metadata["dataset"]: len(events)}, "hist": histogram}
+        output = {"nevents": {events.metadata["dataset"]: len(events)}, 
+                  "hist": {}, 
+                  "BDT_results": {events.metadata["dataset"]: BDT_results.tolist()},
+                  "features_unflattened": {events.metadata["dataset"]: features_unflattened.tolist()}}
 
         return output
 
@@ -451,11 +545,35 @@ class TtbarAnalysis(processor_base):
 Here, we gather all the required information about the files we want to process: paths to the files and asociated metadata.
 
 ```python tags=[]
-fileset = utils.construct_fileset(N_FILES_MAX_PER_SAMPLE, use_xcache=False, af_name=AF_NAME)  # local files on /data for ssl-dev
+fileset = utils.construct_fileset(N_FILES_MAX_PER_SAMPLE, 
+                                  use_xcache=False, 
+                                  af_name=AF_NAME,
+                                  json_file='ntuples_nanoaod_agc.json')  # local files on /data for ssl-dev
 
 print(f"processes in fileset: {list(fileset.keys())}")
 print(f"\nexample of information in fileset:\n{{\n  'files': [{fileset['ttbar__nominal']['files'][0]}, ...],")
 print(f"  'metadata': {fileset['ttbar__nominal']['metadata']}\n}}")
+```
+
+```python
+fileset_keys = list(fileset.keys())
+for key in fileset_keys:
+    if not (#(key=="ttbar__nominal") | 
+            #(key=="single_top_s_chan__nominal") | 
+            #(key=="single_top_t_chan__nominal") | 
+            #(key=="single_top_tW__nominal") | 
+            (key=="wjets__nominal")):
+        fileset.pop(key)
+```
+
+```python
+fileset
+```
+
+```python
+## load model
+model = xgb.XGBClassifier()
+model.load_model(MODEL)
 ```
 
 ### ServiceX-specific functionality: query setup
@@ -567,9 +685,16 @@ if PIPELINE == "coffea":
     filemeta = run.preprocess(fileset, treename="Events")  # pre-processing
 
     t0 = time.monotonic()
-    all_histograms, metrics = run(fileset, "Events", processor_instance=TtbarAnalysis(DISABLE_PROCESSING, IO_FILE_PERCENT))  # processing
+    
+    # processing
+    all_histograms, metrics = run(fileset, 
+                                  "Events", 
+                                  processor_instance=TtbarAnalysis(DISABLE_PROCESSING, 
+                                                                   IO_FILE_PERCENT,
+                                                                   permutations_dict,
+                                                                   model))
     exec_time = time.monotonic() - t0
-    all_histograms = all_histograms["hist"]
+    # all_histograms = all_histograms["hist"]
 
 elif PIPELINE == "servicex_processor":
     # in a notebook:
@@ -590,6 +715,26 @@ elif PIPELINE == "servicex_databinder":
     raise NotImplementedError("further processing of this method is not currently implemented")
 
 print(f"\nexecution took {exec_time:.2f} seconds")
+```
+
+```python
+BDT_results = all_histograms["BDT_results"]["wjets__nominal"]
+features = all_histograms["features_unflattened"]["wjets__nominal"]
+```
+
+```python
+BDT_results = ak.Array(BDT_results)
+features = ak.Array(features)
+```
+
+```python
+maxind = ak.Array(np.argmax(BDT_results, axis=1))
+maxind2 = ak.argmax(BDT_results, axis=1)
+```
+
+```python
+# this is what i want, but not how to get it
+features_reduced = ak.Array([features[i][maxind[i]] for i in range(len(maxind))])
 ```
 
 ```python

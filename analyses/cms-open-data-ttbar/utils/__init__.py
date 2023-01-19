@@ -54,7 +54,7 @@ def set_style():
     plt.rcParams['text.color'] = "222222"
 
 
-def construct_fileset(n_files_max_per_sample, use_xcache=False, af_name="", json_file='ntuples_merged.json'):
+def construct_fileset(n_files_max_per_sample, use_xcache=False, af_name="", json_file='ntuples_merged.json', startind=0):
     # using https://atlas-groupdata.web.cern.ch/atlas-groupdata/dev/AnalysisTop/TopDataPreparation/XSection-MC15-13TeV.data
     # for reference
     # x-secs are in pb
@@ -83,7 +83,7 @@ def construct_fileset(n_files_max_per_sample, use_xcache=False, af_name="", json
             file_list = file_info[process][variation]["files"]
             if n_files_max_per_sample != -1:
                 if len(file_list)>0:
-                    file_list = file_list[:n_files_max_per_sample]  # use partial set of samples
+                    file_list = file_list[startind:n_files_max_per_sample+startind]  # use partial set of samples
 
             file_paths = [f["path"] for f in file_list]
             if use_xcache:

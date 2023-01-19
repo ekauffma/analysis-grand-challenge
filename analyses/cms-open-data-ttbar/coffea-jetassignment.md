@@ -108,7 +108,7 @@ N_FILES_MAX_PER_SAMPLE = 1
 PIPELINE = "coffea"
 
 # enable Dask (may not work yet in combination with ServiceX outside of coffea-casa)
-USE_DASK = False
+USE_DASK = True
 
 # ServiceX behavior: ignore cache with repeated queries
 SERVICEX_IGNORE_CACHE = False
@@ -119,7 +119,7 @@ AF = "coffea_casa"
 ### BENCHMARKING-SPECIFIC SETTINGS
 
 # chunk size to use
-CHUNKSIZE = 5000
+CHUNKSIZE = 100_000
 
 # metadata to propagate through to metrics
 AF_NAME = "coffea_casa"  # "ssl-dev" allows for the switch to local data on /data
@@ -302,7 +302,7 @@ def jet_pt_resolution(pt):
 
 
 class TtbarAnalysis(processor_base):
-    def __init__(self, disable_processing, io_file_percent, permutations_dict, model):
+    def __init__(self, disable_processing, io_file_percent, permutations_dict, model):#, model_name):
         num_bins = 25
         bin_low = 50
         bin_high = 550
@@ -320,7 +320,8 @@ class TtbarAnalysis(processor_base):
         self.disable_processing = disable_processing
         self.io_file_percent = io_file_percent
         self.permutations_dict = permutations_dict
-        self.model = model
+        #self.model_name = model_name # need to pass name if using FuturesExecutor
+        self.model = model # need to pass model if using DaskExecutor
 
     def only_do_IO(self, events):
         # standard AGC branches cover 2.7% of the data
@@ -372,6 +373,13 @@ class TtbarAnalysis(processor_base):
             # IO testing with no subsequent processing
             return self.only_do_IO(events)
 
+        # only if futuresexecutor
+        # model = xgb.XGBClassifier()
+        # model.load_model(self.model_name)
+        
+        # only if daskexecutor
+        model = self.model
+        
         histogram = self.hist.copy()
 
         process = events.metadata["process"]  # "ttbar" etc.
@@ -449,7 +457,7 @@ class TtbarAnalysis(processor_base):
                                                          selected_electrons_region, 
                                                          selected_muons_region, 
                                                          self.permutations_dict)
-                    BDT_results = ak.unflatten(self.model.predict_proba(features)[:, 1], perm_counts)
+                    BDT_results = ak.unflatten(model.predict_proba(features)[:, 1], perm_counts)
                     features_unflattened = ak.unflatten(features, perm_counts)
                     which_combination = ak.argmax(BDT_results,axis=1)
                     ML_observable = ak.flatten(features_unflattened[ak.from_regular(which_combination[:, np.newaxis])])[...,5]
@@ -478,7 +486,7 @@ class TtbarAnalysis(processor_base):
                                                          selected_muons_region, 
                                                          self.permutations_dict)
                     
-                    BDT_results = ak.unflatten(self.model.predict_proba(features)[:, 1], perm_counts)
+                    BDT_results = ak.unflatten(model.predict_proba(features)[:, 1], perm_counts)
                     features_unflattened = ak.unflatten(features, perm_counts)
                     which_combination = ak.argmax(BDT_results,axis=1)
                     ML_observable = ak.flatten(features_unflattened[ak.from_regular(which_combination[:, np.newaxis])])[...,5]
@@ -542,7 +550,8 @@ Here, we gather all the required information about the files we want to process:
 fileset = utils.construct_fileset(N_FILES_MAX_PER_SAMPLE, 
                                   use_xcache=False, 
                                   af_name=AF_NAME,
-                                  json_file='ntuples_nanoaod_agc.json')  # local files on /data for ssl-dev
+                                  json_file='ntuples_nanoaod_agc.json',
+                                  startind=0)  # local files on /data for ssl-dev
 
 print(f"processes in fileset: {list(fileset.keys())}")
 print(f"\nexample of information in fileset:\n{{\n  'files': [{fileset['ttbar__nominal']['files'][0]}, ...],")
@@ -552,22 +561,17 @@ print(f"  'metadata': {fileset['ttbar__nominal']['metadata']}\n}}")
 ```python
 fileset_keys = list(fileset.keys())
 for key in fileset_keys:
-    if not (#(key=="ttbar__nominal") | 
-            #(key=="single_top_s_chan__nominal") | 
-            #(key=="single_top_t_chan__nominal") | 
-            #(key=="single_top_tW__nominal") | 
-            (key=="wjets__nominal")):
+    if not ((key=="ttbar__nominal") | 
+            (key=="single_top_s_chan__nominal") | 
+            (key=="single_top_t_chan__nominal") | 
+            (key=="single_top_tW__nominal") | 
+            (key=="wjets__nominal")
+           ):
         fileset.pop(key)
 ```
 
 ```python
 fileset
-```
-
-```python
-## load model
-model = xgb.XGBClassifier()
-model.load_model(MODEL)
 ```
 
 ### ServiceX-specific functionality: query setup
@@ -668,13 +672,21 @@ What happens here depends on the configuration setting for `PIPELINE`:
 - if `PIPELINE` was set to `servicex_databinder`, the input data has already been pre-processed and will be processed further with `coffea`.
 
 ```python
+# if DaskExecutor
+model = xgb.XGBClassifier()
+model.load_model(MODEL)
+
 if PIPELINE == "coffea":
     if USE_DASK:
-        executor = processor.DaskExecutor(client=utils.get_client(AF, n_cores=1))
+        executor = processor.DaskExecutor(client=utils.get_client(AF))#, n_cores=1))
     else:
         executor = processor.FuturesExecutor(workers=NUM_CORES)
 
-    run = processor.Runner(executor=executor, schema=NanoAODSchema, savemetrics=True, metadata_cache={}, chunksize=CHUNKSIZE)
+    run = processor.Runner(executor=executor, 
+                           schema=NanoAODSchema, 
+                           savemetrics=True, 
+                           metadata_cache={}, 
+                           chunksize=CHUNKSIZE)
 
     filemeta = run.preprocess(fileset, treename="Events")  # pre-processing
 
@@ -709,6 +721,10 @@ elif PIPELINE == "servicex_databinder":
     raise NotImplementedError("further processing of this method is not currently implemented")
 
 print(f"\nexecution took {exec_time:.2f} seconds")
+```
+
+```python
+all_histograms
 ```
 
 ```python

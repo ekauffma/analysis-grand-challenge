@@ -65,7 +65,7 @@ logging.getLogger("cabinetry").setLevel(logging.INFO)
 ### GLOBAL CONFIGURATION
 
 # input files per process, set to e.g. 10 (smaller number = faster, want to use larger number for training)
-N_FILES_MAX_PER_SAMPLE = 20
+N_FILES_MAX_PER_SAMPLE = 50
 # set to "dask" for DaskExecutor, "futures" for FuturesExecutor
 EXEC = "dask"
 
@@ -73,7 +73,7 @@ EXEC = "dask"
 NUM_CORES = 16
 
 # chunk size to use
-CHUNKSIZE = 500_000
+CHUNKSIZE = 100_000
 
 # analysis facility: set to "coffea_casa" for coffea-casa environments, "EAF" for FNAL, "local" for local setups
 AF = "coffea_casa"
@@ -382,12 +382,12 @@ output, metrics = run(fileset,
 
 ```python
 import pickle
-pickle.dump(output, open("output_0.p", "wb"))
+pickle.dump(output, open("output_1.p", "wb"))
 ```
 
 ```python
 import pickle
-output = pickle.load(open("output_0.p", "rb"))
+output = pickle.load(open("output_2.p", "rb"))
 ```
 
 ```python
@@ -395,7 +395,7 @@ output = pickle.load(open("output_0.p", "rb"))
 features = np.array(output['features']['ttbar__nominal'])
 labels = np.array(output['labels']['ttbar__nominal'])
 labels = labels.reshape((len(labels),))
-which_combination = np.array(output['which_combination']['ttbar__nominal'])[:,1]
+# which_combination = np.array(output['which_combination']['ttbar__nominal'])[:,1]
 ```
 
 ```python
@@ -706,7 +706,7 @@ from sklearn.metrics import (
 features = np.array(output['features']['ttbar__nominal'])
 labels = np.array(output['labels']['ttbar__nominal'])
 labels = labels.reshape((len(labels),))
-which_combination = np.array(output['which_combination']['ttbar__nominal'])[:,1]
+# which_combination = np.array(output['which_combination']['ttbar__nominal'])[:,1]
 
 # only consider combinations that are 100% correct or 0% correct
 # features = features[(labels==1) | (labels==0)]
@@ -740,7 +740,7 @@ which_combination_test = np.where(labels_test==1)[1]
 features_test = features_test.reshape((12*features_test.shape[0],19))
 labels_test = labels_test.reshape((12*labels_test.shape[0],))
 
-TRAIN_RATIO = 0.8
+TRAIN_RATIO = 0.9
 features_train, features_val, labels_train, labels_val = train_test_split(features_train_and_val, 
                                                                           labels_train_and_val, 
                                                                           train_size=TRAIN_RATIO,
@@ -860,7 +860,7 @@ best_parameters = fmin(
     space=trial_params,
     algo=tpe.suggest,
     trials=trials,
-    max_evals=10 # how many trials to run
+    max_evals=5 # how many trials to run
                       )
 ```
 

@@ -108,7 +108,7 @@ N_FILES_MAX_PER_SAMPLE = 1
 PIPELINE = "coffea"
 
 # enable Dask (may not work yet in combination with ServiceX outside of coffea-casa)
-USE_DASK = True
+USE_DASK = False
 
 # ServiceX behavior: ignore cache with repeated queries
 SERVICEX_IGNORE_CACHE = False
@@ -119,7 +119,7 @@ AF = "coffea_casa"
 ### BENCHMARKING-SPECIFIC SETTINGS
 
 # chunk size to use
-CHUNKSIZE = 50_000 #500_000
+CHUNKSIZE = 5000
 
 # metadata to propagate through to metrics
 AF_NAME = "coffea_casa"  # "ssl-dev" allows for the switch to local data on /data
@@ -127,7 +127,7 @@ SYSTEMATICS = "all"  # currently has no effect
 CORES_PER_WORKER = 2  # does not do anything, only used for metric gathering (set to 2 for distributed coffea-casa)
 
 # scaling for local setups with FuturesExecutor
-NUM_CORES = 4
+NUM_CORES = 1
 
 # only I/O, all other processing disabled
 DISABLE_PROCESSING = False
@@ -437,12 +437,12 @@ class TtbarAnalysis(processor_base):
                     selected_muons_region = selected_muons[region_filter]
                     
                     # use HT (scalar sum of jet pT) as observable
-                    # pt_var_modifier = (
-                    #     events[event_filters][region_filter][pt_var]
-                    #     if "res" not in pt_var
-                    #     else events[pt_var][jet_filter][event_filters][region_filter]
-                    # )
-                    # observable = ak.sum(selected_jets_region.pt * pt_var_modifier, axis=-1)
+                    pt_var_modifier = (
+                        events[event_filters][region_filter][pt_var]
+                        if "res" not in pt_var
+                        else events[pt_var][jet_filter][event_filters][region_filter]
+                    )
+                    observable = ak.sum(selected_jets_region.pt * pt_var_modifier, axis=-1)
                     
                     # ML component
                     features, perm_counts = get_features(selected_jets_region, 
@@ -451,12 +451,10 @@ class TtbarAnalysis(processor_base):
                                                          self.permutations_dict)
                     BDT_results = ak.unflatten(self.model.predict_proba(features)[:, 1], perm_counts)
                     features_unflattened = ak.unflatten(features, perm_counts)
-                    # # which_combination = np.argmax(BDT_results,axis=1)
-                    # chosen = ak.unflatten(features, perm_counts)[which_combination]
-                    
-                    #ML_observable = ak.unflatten(features, perm_counts)[which_combination,5]
+                    which_combination = ak.argmax(BDT_results,axis=1)
+                    ML_observable = ak.flatten(features_unflattened[ak.from_regular(which_combination[:, np.newaxis])])[...,5]
                     # ML_observable = observable
-
+                    
                 elif region == "4j2b":
                     region_filter = ak.sum(selected_jets.btagCSVV2 > B_TAG_THRESHOLD, axis=1) >= 2
                     
@@ -466,13 +464,13 @@ class TtbarAnalysis(processor_base):
 
                     # reconstruct hadronic top as bjj system with largest pT
                     # the jet energy scale / resolution effect is not propagated to this observable at the moment
-                    # trijet = ak.combinations(selected_jets_region, 3, fields=["j1", "j2", "j3"])  # trijet candidates
-                    # trijet["p4"] = trijet.j1 + trijet.j2 + trijet.j3  # calculate four-momentum of tri-jet system
-                    # trijet["max_btag"] = np.maximum(trijet.j1.btagCSVV2, np.maximum(trijet.j2.btagCSVV2, trijet.j3.btagCSVV2))
-                    # trijet = trijet[trijet.max_btag > B_TAG_THRESHOLD]  # at least one-btag in trijet candidates
-                    # # pick trijet candidate with largest pT and calculate mass of system
-                    # trijet_mass = trijet["p4"][ak.argmax(trijet.p4.pt, axis=1, keepdims=True)].mass
-                    # observable = ak.flatten(trijet_mass)
+                    trijet = ak.combinations(selected_jets_region, 3, fields=["j1", "j2", "j3"])  # trijet candidates
+                    trijet["p4"] = trijet.j1 + trijet.j2 + trijet.j3  # calculate four-momentum of tri-jet system
+                    trijet["max_btag"] = np.maximum(trijet.j1.btagCSVV2, np.maximum(trijet.j2.btagCSVV2, trijet.j3.btagCSVV2))
+                    trijet = trijet[trijet.max_btag > B_TAG_THRESHOLD]  # at least one-btag in trijet candidates
+                    # pick trijet candidate with largest pT and calculate mass of system
+                    trijet_mass = trijet["p4"][ak.argmax(trijet.p4.pt, axis=1, keepdims=True)].mass
+                    observable = ak.flatten(trijet_mass)
                     
                     # ML component
                     features, perm_counts = get_features(selected_jets_region, 
@@ -482,57 +480,53 @@ class TtbarAnalysis(processor_base):
                     
                     BDT_results = ak.unflatten(self.model.predict_proba(features)[:, 1], perm_counts)
                     features_unflattened = ak.unflatten(features, perm_counts)
-                    #which_combination = np.argmax(BDT_results,axis=1)
-                    #chosen = ak.unflatten(features, perm_counts)[which_combination]
-                    
-                    #ML_observable = ak.unflatten(features, perm_counts)[which_combination,5]
+                    which_combination = ak.argmax(BDT_results,axis=1)
+                    ML_observable = ak.flatten(features_unflattened[ak.from_regular(which_combination[:, np.newaxis])])[...,5]
                     # ML_observable = observable
 
                 ### histogram filling
-#                 if pt_var == "pt_nominal":
-#                     # nominal pT, but including 2-point systematics
-#                     histogram.fill(
-#                             observable=observable, deltaR = ML_observable, region=region, process=process,
-#                             variation=variation, weight=xsec_weight
-#                         )
+                if pt_var == "pt_nominal":
+                    # nominal pT, but including 2-point systematics
+                    histogram.fill(
+                            observable=observable, deltaR = ML_observable, region=region, process=process,
+                            variation=variation, weight=xsec_weight
+                        )
 
-#                     if variation == "nominal":
-#                         # also fill weight-based variations for all nominal samples
-#                         for weight_name in events.systematics.fields:
-#                             for direction in ["up", "down"]:
-#                                 # extract the weight variations and apply all event & region filters
-#                                 weight_variation = events.systematics[weight_name][direction][
-#                                     f"weight_{weight_name}"][event_filters][region_filter]
-#                                 # fill histograms
-#                                 histogram.fill(
-#                                     observable=observable, deltaR = ML_observable, region=region, process=process,
-#                                     variation=f"{weight_name}_{direction}", weight=xsec_weight*weight_variation
-#                                 )
+                    if variation == "nominal":
+                        # also fill weight-based variations for all nominal samples
+                        for weight_name in events.systematics.fields:
+                            for direction in ["up", "down"]:
+                                # extract the weight variations and apply all event & region filters
+                                weight_variation = events.systematics[weight_name][direction][
+                                    f"weight_{weight_name}"][event_filters][region_filter]
+                                # fill histograms
+                                histogram.fill(
+                                    observable=observable, deltaR = ML_observable, region=region, process=process,
+                                    variation=f"{weight_name}_{direction}", weight=xsec_weight*weight_variation
+                                )
 
-#                         # calculate additional systematics: b-tagging variations
-#                         for i_var, weight_name in enumerate([f"btag_var_{i}" for i in range(4)]):
-#                             for i_dir, direction in enumerate(["up", "down"]):
-#                                 # create systematic variations that depend on object properties (here: jet pT)
-#                                 if len(observable):
-#                                     weight_variation = btag_weight_variation(i_var, selected_jets_region.pt)[:, i_dir]
-#                                 else:
-#                                     weight_variation = 1 # no events selected
-#                                 histogram.fill(
-#                                     observable=observable, deltaR = ML_observable, region=region, process=process,
-#                                     variation=f"{weight_name}_{direction}", weight=xsec_weight*weight_variation
-#                                 )
+                        # calculate additional systematics: b-tagging variations
+                        for i_var, weight_name in enumerate([f"btag_var_{i}" for i in range(4)]):
+                            for i_dir, direction in enumerate(["up", "down"]):
+                                # create systematic variations that depend on object properties (here: jet pT)
+                                if len(observable):
+                                    weight_variation = btag_weight_variation(i_var, selected_jets_region.pt)[:, i_dir]
+                                else:
+                                    weight_variation = 1 # no events selected
+                                histogram.fill(
+                                    observable=observable, deltaR = ML_observable, region=region, process=process,
+                                    variation=f"{weight_name}_{direction}", weight=xsec_weight*weight_variation
+                                )
 
-#                 elif variation == "nominal":
-#                     # pT variations for nominal samples
-#                     histogram.fill(
-#                             observable=observable, deltaR = ML_observable, region=region, process=process,
-#                             variation=pt_var, weight=xsec_weight
-#                         )
+                elif variation == "nominal":
+                    # pT variations for nominal samples
+                    histogram.fill(
+                            observable=observable, deltaR = ML_observable, region=region, process=process,
+                            variation=pt_var, weight=xsec_weight
+                        )
 
         output = {"nevents": {events.metadata["dataset"]: len(events)}, 
-                  "hist": {}, 
-                  "BDT_results": {events.metadata["dataset"]: BDT_results.tolist()},
-                  "features_unflattened": {events.metadata["dataset"]: features_unflattened.tolist()}}
+                  "hist": histogram}
 
         return output
 
@@ -676,7 +670,7 @@ What happens here depends on the configuration setting for `PIPELINE`:
 ```python
 if PIPELINE == "coffea":
     if USE_DASK:
-        executor = processor.DaskExecutor(client=utils.get_client(AF))
+        executor = processor.DaskExecutor(client=utils.get_client(AF, n_cores=1))
     else:
         executor = processor.FuturesExecutor(workers=NUM_CORES)
 
@@ -718,26 +712,6 @@ print(f"\nexecution took {exec_time:.2f} seconds")
 ```
 
 ```python
-BDT_results = all_histograms["BDT_results"]["wjets__nominal"]
-features = all_histograms["features_unflattened"]["wjets__nominal"]
-```
-
-```python
-BDT_results = ak.Array(BDT_results)
-features = ak.Array(features)
-```
-
-```python
-maxind = ak.Array(np.argmax(BDT_results, axis=1))
-maxind2 = ak.argmax(BDT_results, axis=1)
-```
-
-```python
-# this is what i want, but not how to get it
-features_reduced = ak.Array([features[i][maxind[i]] for i in range(len(maxind))])
-```
-
-```python
 # track metrics for pure coffea setups
 if PIPELINE == "coffea":
     # update metrics
@@ -766,19 +740,23 @@ Let's have a look at the data we obtained.
 We built histograms in two phase space regions, for multiple physics processes and systematic variations.
 
 ```python
-utils.set_style()
-
-all_histograms[120j::hist.rebin(2), "4j1b", :, "nominal"].stack("process")[::-1].plot(stack=True, histtype="fill", linewidth=1, edgecolor="grey")
-plt.legend(frameon=False)
-plt.title(">= 4 jets, 1 b-tag")
-plt.xlabel("HT [GeV]");
+all_histograms = all_histograms["hist"]
 ```
 
 ```python
-all_histograms[:, "4j2b", :, "nominal"].stack("process")[::-1].plot(stack=True, histtype="fill", linewidth=1,edgecolor="grey")
+utils.set_style()
+
+all_histograms[120j::hist.rebin(2), :, "4j1b", :, "nominal"].stack("process")[::-1].project("deltaR").plot(stack=True, histtype="fill", linewidth=1, edgecolor="grey")
+plt.legend(frameon=False)
+plt.title(">= 4 jets, 1 b-tag")
+plt.xlabel("deltaR");
+```
+
+```python
+all_histograms[:, :, "4j2b", :, "nominal"].stack("process")[::-1].project("deltaR").plot(stack=True, histtype="fill", linewidth=1,edgecolor="grey")
 plt.legend(frameon=False)
 plt.title(">= 4 jets, >= 2 b-tags")
-plt.xlabel("$m_{bjj}$ [Gev]");
+plt.xlabel("deltaR");
 ```
 
 Our top reconstruction approach ($bjj$ system with largest $p_T$) has worked!

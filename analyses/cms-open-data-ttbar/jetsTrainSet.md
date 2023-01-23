@@ -58,6 +58,10 @@ import onnx
 
 import utils
 
+import mlflow
+import mlflow.xgboost
+from mlflow.models.signature import infer_signature
+
 logging.getLogger("cabinetry").setLevel(logging.INFO)
 ```
 
@@ -387,7 +391,7 @@ pickle.dump(output, open("output_1.p", "wb"))
 
 ```python
 import pickle
-output = pickle.load(open("output_2.p", "rb"))
+output = pickle.load(open("output_0.p", "rb"))
 ```
 
 ```python
@@ -803,65 +807,124 @@ print(evaluation_matrix)
 ```
 
 ```python
+mlflow.set_tracking_uri("https://mlflow.software-dev.ncsa.cloud")
+# EXPERIMENT_ID = mlflow.set_experiment('optimize-reconstruction-bdt-00')
+```
+
+```python
+current_experiment=dict(mlflow.get_experiment_by_name('optimize-reconstruction-bdt-00'))
+EXPERIMENT_ID=current_experiment['experiment_id']
+EXPERIMENT_ID
+```
+
+```python
+import boto3
+import os
+
+ACCESS_ID = os.getenv('AWS_ACCESS_KEY_ID')
+ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+s3 = boto3.resource('s3', aws_access_key_id=ACCESS_ID, aws_secret_access_key= ACCESS_KEY)
+```
+
+```python
+s3.buckets
+```
+
+```python
 # training method for hyperopt
 def train_and_evaluate(params):
-    model = xgb.XGBClassifier(**params) # define model with current parameters
-    model = model.fit(features_train, labels_train) # train model
     
-    # predicting train set and validation set
-    train_predicted = model.predict(features_train)
-    train_predicted_prob = model.predict_proba(features_train)[:, 1]
-    val_predicted = model.predict(features_val)
-    val_predicted_prob = model.predict_proba(features_val)[:, 1]
+    mlflow.xgboost.autolog()
     
-    # model metrics to track
-    metric_names = ['accuracy', 'precision', 'recall', 'f1', 'aucroc']
-        
-    # Training evaluation metrics
-    train_metrics = {
-        'Accuracy': accuracy_score(labels_train, train_predicted), 
-        'Precision': precision_score(labels_train, train_predicted, zero_division=0), 
-        'Recall': recall_score(labels_train, train_predicted), 
-        'F1': f1_score(labels_train, train_predicted), 
-        'AUCROC': roc_auc_score(labels_train, train_predicted_prob),
-    }
-    train_metrics_values = list(train_metrics.values())
+    with mlflow.start_run(experiment_id=EXPERIMENT_ID, nested=True):
     
-    # Validation evaluation metrics
-    val_metrics = {
-        'Accuracy': accuracy_score(labels_val, val_predicted), 
-        'Precision': precision_score(labels_val, val_predicted, zero_division=0), 
-        'Recall': recall_score(labels_val, val_predicted), 
-        'F1': f1_score(labels_val, val_predicted), 
-        'AUCROC': roc_auc_score(labels_val, val_predicted_prob),
-    }
-    val_metrics_values = list(val_metrics.values())
-    
-    val_predicted_prob = val_predicted_prob.reshape((int(len(val_predicted_prob)/12),12))
-    val_predicted_combination = np.argmax(val_predicted_prob,axis=1)
-    
-    scores = np.zeros(len(which_combination_val))
-    zipped = list(zip(which_combination_val.tolist(), val_predicted_combination.tolist()))
-    for i in range(len(which_combination_val)):
-        scores[i] = evaluation_matrix[zipped[i]]
-        
-    score = -sum(scores)/len(scores)
+        model = xgb.XGBClassifier(**params) # define model with current parameters
+        model = model.fit(features_train, labels_train) # train model
 
-    return {'status': STATUS_OK, 'loss': score}
+        # predicting train set and validation set
+        train_predicted = model.predict(features_train)
+        train_predicted_prob = model.predict_proba(features_train)[:, 1]
+        val_predicted = model.predict(features_val)
+        val_predicted_prob = model.predict_proba(features_val)[:, 1]
+
+        # model metrics to track
+        metric_names = ['accuracy', 'precision', 'recall', 'f1', 'aucroc']
+
+        # Training evaluation metrics
+        train_metrics = {
+            'Accuracy': accuracy_score(labels_train, train_predicted), 
+            'Precision': precision_score(labels_train, train_predicted, zero_division=0), 
+            'Recall': recall_score(labels_train, train_predicted), 
+            'F1': f1_score(labels_train, train_predicted), 
+            'AUCROC': roc_auc_score(labels_train, train_predicted_prob),
+        }
+
+        # Validation evaluation metrics
+        val_metrics = {
+            'Accuracy': accuracy_score(labels_val, val_predicted), 
+            'Precision': precision_score(labels_val, val_predicted, zero_division=0), 
+            'Recall': recall_score(labels_val, val_predicted), 
+            'F1': f1_score(labels_val, val_predicted), 
+            'AUCROC': roc_auc_score(labels_val, val_predicted_prob),
+        }
+
+        train_predicted_prob = train_predicted_prob.reshape((int(len(train_predicted_prob)/12),12))
+        train_predicted_combination = np.argmax(train_predicted_prob,axis=1)
+
+        scores = np.zeros(len(which_combination_train))
+        zipped = list(zip(which_combination_train.tolist(), train_predicted_combination.tolist()))
+        for i in range(len(which_combination_train)):
+            scores[i] = evaluation_matrix[zipped[i]]
+        score_train = -sum(scores)/len(scores)
+        
+        val_predicted_prob = val_predicted_prob.reshape((int(len(val_predicted_prob)/12),12))
+        val_predicted_combination = np.argmax(val_predicted_prob,axis=1)
+
+        scores = np.zeros(len(which_combination_val))
+        zipped = list(zip(which_combination_val.tolist(), val_predicted_combination.tolist()))
+        for i in range(len(which_combination_val)):
+            scores[i] = evaluation_matrix[zipped[i]]
+        score_val = -sum(scores)/len(scores)
+        
+        train_metrics["Jet-Accuracy"] = score_train
+        train_metrics_values = list(train_metrics.values())
+        
+        val_metrics["Jet-Accuracy"] = score_val
+        val_metrics_values = list(val_metrics.values())
+        
+        # Logging model signature, class, and name
+        signature = infer_signature(features_train, val_predicted)
+        mlflow.xgboost.log_model(model, 'model', signature=signature)
+        mlflow.set_tag('estimator_name', model.__class__.__name__)
+        mlflow.set_tag('estimator_class', model.__class__)
+
+        metric_names = ['accuracy', 'precision', 'recall', 'f1', 'aucroc', "jet-accuracy"]
+        # Logging each metric
+        for name, metric in list(zip(metric_names, train_metrics_values)):
+            mlflow.log_metric(f'training_{name}', metric)
+        for name, metric in list(zip(metric_names, val_metrics_values)):
+            mlflow.log_metric(f'validation_{name}', metric)
+
+    return {'status': STATUS_OK, 'loss': score_val}
     # return {'status': STATUS_OK, 'loss': -1*val_metrics['AUCROC']}
 ```
 
 ```python
+
+```
+
+```python tags=[]
 trials = Trials()
 
 # optimize model
-best_parameters = fmin(
-    fn=train_and_evaluate, 
-    space=trial_params,
-    algo=tpe.suggest,
-    trials=trials,
-    max_evals=5 # how many trials to run
-                      )
+with mlflow.start_run(experiment_id=EXPERIMENT_ID, run_name='xgboost_bdt_models'):
+    best_parameters = fmin(
+        fn=train_and_evaluate, 
+        space=trial_params,
+        algo=tpe.suggest,
+        trials=trials,
+        max_evals=20 # how many trials to run
+                          )
 ```
 
 ```python
@@ -975,6 +1038,33 @@ print("Random Assignment Jet Score = ", 0.375)
 ```python
 # save model to json. this file can be used with the FIL backend in nvidia-triton!
 model.save_model("models/model_allcombinations_xgb.json")
+```
+
+```python
+model = xgb.XGBClassifier()
+model.load_model("models/model_allcombinations_xgb.json")
+```
+
+```python
+from skl2onnx import convert_sklearn
+from skl2onnx.common.data_types import FloatTensorType
+import onnxmltools
+import onnx
+```
+
+```python
+initial_type = [('float_input', FloatTensorType([None, 19]))]
+onx = onnxmltools.convert.convert_xgboost(model)#, initial_types=initial_type)
+```
+
+```python
+
+```
+
+```python
+convert_sklearn(model, 'bdt_xgboost',
+                [('input', FloatTensorType([None, 19]))])#,
+                 #target_opset={'': 12, 'ai.onnx.ml': 2})
 ```
 
 ```python

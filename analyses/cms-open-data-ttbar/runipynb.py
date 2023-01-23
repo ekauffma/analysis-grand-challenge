@@ -1,7 +1,5 @@
 import json
 
-
-
 class Notebook:
     def __init__(self, file, changed_variables={}):
         self._globals = {}
@@ -39,8 +37,9 @@ class Notebook:
                 # print("Cell Number = ", cell_number)
                 try:
                     # change values if needed
-                    for var_name in list(set(self._locals) & set(self.changed_variables)):
-                        self._locals[var_name] = self.changed_variables[var_name]
+                    if cell_number in self.changed_variables.keys():
+                        for var_name in list(set(self._locals) & set(self.changed_variables[cell_number])):
+                            self._locals[var_name] = self.changed_variables[cell_number][var_name]
                         
                     # run cell
                     exec(source, self._globals, self._locals)

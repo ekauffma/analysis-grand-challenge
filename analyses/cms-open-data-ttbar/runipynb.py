@@ -1,4 +1,6 @@
 import json
+import hist
+from collections import ChainMap
 
 class Notebook:
     def __init__(self, file, changed_variables={}):
@@ -32,29 +34,34 @@ class Notebook:
             
 
         for cell_number, cell in enumerate(self.json["cells"]):
+                        
+            if cell_number in self.changed_variables.keys():
+                
+                print("Cell Number = ", cell_number)
+                variables_to_change = list(set(self._locals) & set(self.changed_variables[cell_number]))
+                print("Variables to Change = ", variables_to_change)
+                
+                for var_name in variables_to_change:
+                    self._locals[var_name] = self.changed_variables[cell_number][var_name]
+            
             if cell["cell_type"] == "code":
                 source = "".join(cell["source"])
-                # print("Cell Number = ", cell_number)
+                
                 try:
-                    # change values if needed
-                    if cell_number in self.changed_variables.keys():
-                        for var_name in list(set(self._locals) & set(self.changed_variables[cell_number])):
-                            self._locals[var_name] = self.changed_variables[cell_number][var_name]
-                        
                     # run cell
                     exec(source, self._globals, self._locals)
+                    
                 except Exception as err:
                     
                     print("Exception")
-                    print("self._locals = ", self._locals)
-                    print("self._globals = ", self._globals)
-                    
+                
                     x = cell.get("metadata")
                     if x is not None:
                         x = x.get("tags")
                         if x is not None:
                             if "raises-exception" in x:
                                 continue
+                                
                     note = f"in cell number {cell_number} (where the first cell is 0)"
                     if hasattr(err, "add_note"):
                         err.add_note(note)

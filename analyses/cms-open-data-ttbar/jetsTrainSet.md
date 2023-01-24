@@ -69,7 +69,7 @@ logging.getLogger("cabinetry").setLevel(logging.INFO)
 ### GLOBAL CONFIGURATION
 
 # input files per process, set to e.g. 10 (smaller number = faster, want to use larger number for training)
-N_FILES_MAX_PER_SAMPLE = 50
+N_FILES_MAX_PER_SAMPLE = 1
 # set to "dask" for DaskExecutor, "futures" for FuturesExecutor
 EXEC = "dask"
 
@@ -385,8 +385,8 @@ output, metrics = run(fileset,
 ```
 
 ```python
-import pickle
-pickle.dump(output, open("output_1.p", "wb"))
+# import pickle
+# pickle.dump(output, open("output_1.p", "wb"))
 ```
 
 ```python
@@ -768,6 +768,20 @@ labels_val = labels_val.reshape((12*labels_val.shape[0],))
 ```
 
 ```python
+features_train = features_train[:12000,:]
+labels_train = labels_train[:12000]
+which_combination_train = which_combination_train[:int(12000/12)]
+
+features_val = features_val[:2400,:]
+which_combination_val = which_combination_val[:int(2400/12)]
+labels_val = labels_val[:2400]
+
+features_test = features_test[:2400,:]
+labels_test = labels_test[:2400]
+which_combination_test = which_combination_test[:int(2400/12)]
+```
+
+```python
 # preprocess features so that they are more Gaussian-like
 power = PowerTransformer(method='yeo-johnson', standardize=True)
 
@@ -808,35 +822,28 @@ print(evaluation_matrix)
 
 ```python
 mlflow.set_tracking_uri("https://mlflow.software-dev.ncsa.cloud")
-# EXPERIMENT_ID = mlflow.set_experiment('optimize-reconstruction-bdt-00')
+EXPERIMENT_ID = mlflow.set_experiment('optimize-reconstruction-bdt-00')
+```
+
+```python
+%env MLFLOW_TRACKING_URI=https://mlflow.software-dev.ncsa.cloud
+%env MLFLOW_S3_ENDPOINT_URL=https://mlflow-minio-api.software-dev.ncsa.cloud
+%env AWS_ACCESS_KEY_ID=#set key id here
+%env AWS_SECRET_ACCESS_KEY=#set access key here
 ```
 
 ```python
 current_experiment=dict(mlflow.get_experiment_by_name('optimize-reconstruction-bdt-00'))
-EXPERIMENT_ID=current_experiment['experiment_id']
-EXPERIMENT_ID
-```
-
-```python
-import boto3
-import os
-
-ACCESS_ID = os.getenv('AWS_ACCESS_KEY_ID')
-ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
-s3 = boto3.resource('s3', aws_access_key_id=ACCESS_ID, aws_secret_access_key= ACCESS_KEY)
-```
-
-```python
-s3.buckets
+EXP_ID=current_experiment['experiment_id']
 ```
 
 ```python
 # training method for hyperopt
 def train_and_evaluate(params):
     
-    mlflow.xgboost.autolog()
+    # mlflow.xgboost.autolog()
     
-    with mlflow.start_run(experiment_id=EXPERIMENT_ID, nested=True):
+    with mlflow.start_run(experiment_id=EXP_ID, nested=True):
     
         model = xgb.XGBClassifier(**params) # define model with current parameters
         model = model.fit(features_train, labels_train) # train model
@@ -886,10 +893,10 @@ def train_and_evaluate(params):
             scores[i] = evaluation_matrix[zipped[i]]
         score_val = -sum(scores)/len(scores)
         
-        train_metrics["Jet-Accuracy"] = score_train
+        train_metrics["Jet-Accuracy"] = -score_train
         train_metrics_values = list(train_metrics.values())
         
-        val_metrics["Jet-Accuracy"] = score_val
+        val_metrics["Jet-Accuracy"] = -score_val
         val_metrics_values = list(val_metrics.values())
         
         # Logging model signature, class, and name
@@ -906,7 +913,6 @@ def train_and_evaluate(params):
             mlflow.log_metric(f'validation_{name}', metric)
 
     return {'status': STATUS_OK, 'loss': score_val}
-    # return {'status': STATUS_OK, 'loss': -1*val_metrics['AUCROC']}
 ```
 
 ```python
@@ -917,7 +923,7 @@ def train_and_evaluate(params):
 trials = Trials()
 
 # optimize model
-with mlflow.start_run(experiment_id=EXPERIMENT_ID, run_name='xgboost_bdt_models'):
+with mlflow.start_run(experiment_id=EXP_ID, run_name='xgboost_bdt_models'):
     best_parameters = fmin(
         fn=train_and_evaluate, 
         space=trial_params,
@@ -1043,30 +1049,4 @@ model.save_model("models/model_allcombinations_xgb.json")
 ```python
 model = xgb.XGBClassifier()
 model.load_model("models/model_allcombinations_xgb.json")
-```
-
-```python
-from skl2onnx import convert_sklearn
-from skl2onnx.common.data_types import FloatTensorType
-import onnxmltools
-import onnx
-```
-
-```python
-initial_type = [('float_input', FloatTensorType([None, 19]))]
-onx = onnxmltools.convert.convert_xgboost(model)#, initial_types=initial_type)
-```
-
-```python
-
-```
-
-```python
-convert_sklearn(model, 'bdt_xgboost',
-                [('input', FloatTensorType([None, 19]))])#,
-                 #target_opset={'': 12, 'ai.onnx.ml': 2})
-```
-
-```python
-
 ```

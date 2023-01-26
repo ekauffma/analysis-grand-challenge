@@ -121,7 +121,7 @@ AF = "coffea_casa"
 ### BENCHMARKING-SPECIFIC SETTINGS
 
 # chunk size to use
-CHUNKSIZE = 50_000
+CHUNKSIZE = 100_000
 
 # metadata to propagate through to metrics
 AF_NAME = "coffea_casa"  # "ssl-dev" allows for the switch to local data on /data
@@ -162,10 +162,34 @@ for n in range(4,MAX_N_JETS+1):
     permutations = ak.concatenate([test[unzipped[i][different]][..., np.newaxis] 
                                    for i in range(len(unzipped))], 
                                   axis=1).to_list()
-
-    print("number of permutations for n=",n,": ", len(permutations))
     
     permutations_dict[n] = permutations
+    
+# get labels so that we can filter our duplicates (W jets are treated as exchangeable)
+labels_dict = {}
+for n in range(4,MAX_N_JETS+1):
+    
+    current_labels = []
+    for inds in permutations_dict[n]:
+        
+        inds = np.array(inds)
+        current_label = 100*np.ones(n)
+        current_label[inds[:2]] = 24
+        current_label[inds[2]] = 6
+        current_label[inds[3]] = -6
+        current_labels.append(current_label.tolist())
+        
+    labels_dict[n] = current_labels
+    
+# filter out duplicates
+for n in range(4,MAX_N_JETS+1):
+    res = []
+    for idx, val in enumerate(labels_dict[n]):
+        if val in labels_dict[n][:idx]:
+            res.append(idx)
+    labels_dict[n] = np.array(labels_dict[n])[res].tolist()
+    permutations_dict[n] = np.array(permutations_dict[n])[res].tolist()
+    print("number of permutations for n=",n,": ", len(permutations_dict[n]))
 ```
 
 ```python
@@ -753,6 +777,10 @@ all_histograms[:, :, "4j2b", :, "nominal"].stack("process")[::-1].project("delta
 plt.legend(frameon=False)
 plt.title(">= 4 jets, >= 2 b-tags")
 plt.xlabel("deltaR");
+```
+
+```python
+
 ```
 
 ```python

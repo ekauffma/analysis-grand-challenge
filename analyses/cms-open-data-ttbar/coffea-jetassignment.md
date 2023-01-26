@@ -101,7 +101,7 @@ When setting the `PIPELINE` variable below to `"servicex_databinder"`, the `N_FI
 ### GLOBAL CONFIGURATION
 
 # input files per process, set to e.g. 10 (smaller number = faster)
-N_FILES_MAX_PER_SAMPLE = 30
+N_FILES_MAX_PER_SAMPLE = 1
 
 # pipeline to use:
 # - "coffea" for pure coffea setup
@@ -110,7 +110,7 @@ N_FILES_MAX_PER_SAMPLE = 30
 PIPELINE = "coffea"
 
 # enable Dask (may not work yet in combination with ServiceX outside of coffea-casa)
-USE_DASK = True
+USE_DASK = False
 
 # ServiceX behavior: ignore cache with repeated queries
 SERVICEX_IGNORE_CACHE = False
@@ -129,7 +129,7 @@ SYSTEMATICS = "all"  # currently has no effect
 CORES_PER_WORKER = 2  # does not do anything, only used for metric gathering (set to 2 for distributed coffea-casa)
 
 # scaling for local setups with FuturesExecutor
-NUM_CORES = 1
+NUM_CORES = 6
 
 # only I/O, all other processing disabled
 DISABLE_PROCESSING = False
@@ -139,7 +139,7 @@ DISABLE_PROCESSING = False
 IO_FILE_PERCENT = 2.7
 
 # ML options
-MAX_N_JETS = 6 # maximum number of jets to consider in reconstruction BDT
+MAX_N_JETS = 4 # maximum number of jets to consider in reconstruction BDT
 
 MODEL = "models/model_allcombinations_xgb.json" # BDT json
 ```
@@ -190,9 +190,11 @@ def get_features(jets, electrons, muons, permutations_dict):
     njet[njet>max(permutations_dict.keys())] = max(permutations_dict.keys())
     # create awkward array of permutation indices
     perms = ak.Array([permutations_dict[n] for n in njet])
+    perm_counts = ak.num(perms)
     
     
     #### calculate features ####
+    features = np.zeros((sum(perm_counts),19))
     
     # grab lepton info
     lepton_eta = (ak.sum(electrons.eta,axis=-1) + ak.sum(muons.eta,axis=-1))
@@ -200,76 +202,55 @@ def get_features(jets, electrons, muons, permutations_dict):
     lepton_mass = (ak.sum(electrons.mass,axis=-1) + ak.sum(muons.mass,axis=-1))
 
     # delta R between top1 and lepton
-    deltar_0 = np.sqrt((lepton_eta - jets[perms[...,3]].eta)**2 + 
-                       (lepton_phi - jets[perms[...,3]].phi)**2)
+    features[:,0] = ak.flatten(np.sqrt((lepton_eta - jets[perms[...,3]].eta)**2 + 
+                                       (lepton_phi - jets[perms[...,3]].phi)**2)).to_numpy()
 
     # delta R between the two W
-    deltar_1 = np.sqrt((jets[perms[...,0]].eta - jets[perms[...,1]].eta)**2 + 
-                       (jets[perms[...,0]].phi - jets[perms[...,1]].phi)**2)
+    features[:,1] = ak.flatten(np.sqrt((jets[perms[...,0]].eta - jets[perms[...,1]].eta)**2 + 
+                                       (jets[perms[...,0]].phi - jets[perms[...,1]].phi)**2)).to_numpy()
 
     # delta R between W and top2
-    deltar_2 = np.sqrt((jets[perms[...,0]].eta - jets[perms[...,2]].eta)**2 + 
-                       (jets[perms[...,0]].phi - jets[perms[...,2]].phi)**2)
-    deltar_3 = np.sqrt((jets[perms[...,1]].eta - jets[perms[...,2]].eta)**2 + 
-                       (jets[perms[...,1]].phi - jets[perms[...,2]].phi)**2)
+    features[:,2] = ak.flatten(np.sqrt((jets[perms[...,0]].eta - jets[perms[...,2]].eta)**2 + 
+                                       (jets[perms[...,0]].phi - jets[perms[...,2]].phi)**2)).to_numpy()
+    features[:,3] = ak.flatten(np.sqrt((jets[perms[...,1]].eta - jets[perms[...,2]].eta)**2 + 
+                                       (jets[perms[...,1]].phi - jets[perms[...,2]].phi)**2)).to_numpy()
 
     # delta phi between top1 and lepton
-    deltaphi_0 = np.abs(lepton_phi - jets[perms[...,3]].phi)
+    features[:,4] = ak.flatten(np.abs(lepton_phi - jets[perms[...,3]].phi)).to_numpy()
 
     # delta phi between the two W
-    deltaphi_1 = np.abs(jets[perms[...,0]].phi - jets[perms[...,1]].phi)
+    features[:,5] = ak.flatten(np.abs(jets[perms[...,0]].phi - jets[perms[...,1]].phi)).to_numpy()
 
     # delta phi between W and top2
-    deltaphi_2 = np.abs(jets[perms[...,0]].phi - jets[perms[...,2]].phi)
-    deltaphi_3 = np.abs(jets[perms[...,1]].phi - jets[perms[...,2]].phi)
+    features[:,6] = ak.flatten(np.abs(jets[perms[...,0]].phi - jets[perms[...,2]].phi)).to_numpy()
+    features[:,7] = ak.flatten(np.abs(jets[perms[...,1]].phi - jets[perms[...,2]].phi)).to_numpy()
+
 
     # combined mass of top1 and lepton
-    combinedmass_0 = lepton_mass + jets[perms[...,3]].mass
+    features[:,8] = ak.flatten(lepton_mass + jets[perms[...,3]].mass).to_numpy()
 
     # combined mass of W
-    combinedmass_1 = jets[perms[...,0]].mass + jets[perms[...,1]].mass
+    features[:,9] = ak.flatten(jets[perms[...,0]].mass + jets[perms[...,1]].mass).to_numpy()
 
     # combined mass of W and top2
-    combinedmass_2 = jets[perms[...,0]].mass + jets[perms[...,1]].mass + jets[perms[...,2]].mass
+    features[:,10] = ak.flatten(jets[perms[...,0]].mass + 
+                                jets[perms[...,1]].mass + 
+                                jets[perms[...,2]].mass).to_numpy()
 
-    # # pt of every jet
-    jetpt_0 = jets[perms[...,0]].pt
-    jetpt_1 = jets[perms[...,1]].pt
-    jetpt_2 = jets[perms[...,2]].pt
-    jetpt_3 = jets[perms[...,3]].pt
 
-    # # mass of every jet
-    jetmass_0 = jets[perms[...,0]].mass
-    jetmass_1 = jets[perms[...,1]].mass
-    jetmass_2 = jets[perms[...,2]].mass
-    jetmass_3 = jets[perms[...,3]].mass
+    # pt of every jet
+    features[:,11] = ak.flatten(jets[perms[...,0]].pt).to_numpy()
+    features[:,12] = ak.flatten(jets[perms[...,1]].pt).to_numpy()
+    features[:,13] = ak.flatten(jets[perms[...,2]].pt).to_numpy()
+    features[:,14] = ak.flatten(jets[perms[...,3]].pt).to_numpy()
 
-    features = ak.concatenate([deltar_0[..., np.newaxis],
-                               deltar_1[..., np.newaxis],
-                               deltar_2[..., np.newaxis],
-                               deltar_3[..., np.newaxis],
-                               deltaphi_0[..., np.newaxis],
-                               deltaphi_1[..., np.newaxis],
-                               deltaphi_2[..., np.newaxis],
-                               deltaphi_3[..., np.newaxis],
-                               combinedmass_0[..., np.newaxis],
-                               combinedmass_1[..., np.newaxis],
-                               combinedmass_2[..., np.newaxis],
-                               jetpt_0[..., np.newaxis],
-                               jetpt_1[..., np.newaxis],
-                               jetpt_2[..., np.newaxis],
-                               jetpt_3[..., np.newaxis],
-                               jetmass_0[..., np.newaxis],
-                               jetmass_1[..., np.newaxis],
-                               jetmass_2[..., np.newaxis],
-                               jetmass_3[..., np.newaxis]], 
-                              axis=2)
 
-    # keep counts to unflatten
-    perm_counts = ak.num(features)
-    # flatten features
-    features = ak.flatten(features, axis=1)    
-        
+    # mass of every jet
+    features[:,15] = ak.flatten(jets[perms[...,0]].mass).to_numpy()
+    features[:,16] = ak.flatten(jets[perms[...,1]].mass).to_numpy()
+    features[:,17] = ak.flatten(jets[perms[...,2]].mass).to_numpy()
+    features[:,18] = ak.flatten(jets[perms[...,3]].mass).to_numpy()
+
     return features, perm_counts
 ```
 
@@ -304,7 +285,7 @@ def jet_pt_resolution(pt):
 
 
 class TtbarAnalysis(processor_base):
-    def __init__(self, disable_processing, io_file_percent, permutations_dict, model):#, model_name):
+    def __init__(self, disable_processing, io_file_percent, permutations_dict, model_name):
         num_bins = 25
         bin_low = 50
         bin_high = 550
@@ -322,8 +303,8 @@ class TtbarAnalysis(processor_base):
         self.disable_processing = disable_processing
         self.io_file_percent = io_file_percent
         self.permutations_dict = permutations_dict
-        #self.model_name = model_name # need to pass name if using FuturesExecutor
-        self.model = model # need to pass model if using DaskExecutor
+        self.model_name = model_name # need to pass name if using FuturesExecutor
+        # self.model = model # need to pass model if using DaskExecutor
 
     def only_do_IO(self, events):
         # standard AGC branches cover 2.7% of the data
@@ -376,11 +357,11 @@ class TtbarAnalysis(processor_base):
             return self.only_do_IO(events)
 
         # only if futuresexecutor
-        # model = xgb.XGBClassifier()
-        # model.load_model(self.model_name)
+        model = xgb.XGBClassifier()
+        model.load_model(self.model_name)
         
         # only if daskexecutor
-        model = self.model
+        # model = self.model
         
         histogram = self.hist.copy()
 
@@ -459,6 +440,7 @@ class TtbarAnalysis(processor_base):
                                                          selected_electrons_region, 
                                                          selected_muons_region, 
                                                          self.permutations_dict)
+                    
                     BDT_results = ak.unflatten(model.predict_proba(features)[:, 1], perm_counts)
                     features_unflattened = ak.unflatten(features, perm_counts)
                     which_combination = ak.argmax(BDT_results,axis=1)
@@ -673,10 +655,10 @@ What happens here depends on the configuration setting for `PIPELINE`:
 - when set to `coffea`, processing will happen with pure `coffea`,
 - if `PIPELINE` was set to `servicex_databinder`, the input data has already been pre-processed and will be processed further with `coffea`.
 
-```python
+```python tags=[]
 # if DaskExecutor
-model = xgb.XGBClassifier()
-model.load_model(MODEL)
+# model = xgb.XGBClassifier()
+# model.load_model(MODEL)
 
 if PIPELINE == "coffea":
     if USE_DASK:
@@ -700,7 +682,7 @@ if PIPELINE == "coffea":
                                   processor_instance=TtbarAnalysis(DISABLE_PROCESSING, 
                                                                    IO_FILE_PERCENT,
                                                                    permutations_dict,
-                                                                   model))
+                                                                   MODEL))
     exec_time = time.monotonic() - t0
     # all_histograms = all_histograms["hist"]
 
@@ -723,10 +705,6 @@ elif PIPELINE == "servicex_databinder":
     raise NotImplementedError("further processing of this method is not currently implemented")
 
 print(f"\nexecution took {exec_time:.2f} seconds")
-```
-
-```python
-all_histograms
 ```
 
 ```python

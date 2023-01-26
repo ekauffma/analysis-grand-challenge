@@ -391,7 +391,7 @@ output, metrics = run(fileset,
 
 ```python
 import pickle
-output = pickle.load(open("output_0.p", "rb"))
+output = pickle.load(open("output_2.p", "rb"))
 ```
 
 ```python
@@ -399,7 +399,6 @@ output = pickle.load(open("output_0.p", "rb"))
 features = np.array(output['features']['ttbar__nominal'])
 labels = np.array(output['labels']['ttbar__nominal'])
 labels = labels.reshape((len(labels),))
-# which_combination = np.array(output['which_combination']['ttbar__nominal'])[:,1]
 ```
 
 ```python
@@ -768,17 +767,17 @@ labels_val = labels_val.reshape((12*labels_val.shape[0],))
 ```
 
 ```python
-features_train = features_train[:12000,:]
-labels_train = labels_train[:12000]
-which_combination_train = which_combination_train[:int(12000/12)]
+features_train = features_train[:36000,:]
+labels_train = labels_train[:36000]
+which_combination_train = which_combination_train[:int(36000/12)]
 
-features_val = features_val[:2400,:]
-which_combination_val = which_combination_val[:int(2400/12)]
-labels_val = labels_val[:2400]
+features_val = features_val[:6000,:]
+which_combination_val = which_combination_val[:int(6000/12)]
+labels_val = labels_val[:6000]
 
-features_test = features_test[:2400,:]
-labels_test = labels_test[:2400]
-which_combination_test = which_combination_test[:int(2400/12)]
+features_test = features_test[:6000,:]
+labels_test = labels_test[:6000]
+which_combination_test = which_combination_test[:int(6000/12)]
 ```
 
 ```python
@@ -828,8 +827,8 @@ EXPERIMENT_ID = mlflow.set_experiment('optimize-reconstruction-bdt-00')
 ```python
 %env MLFLOW_TRACKING_URI=https://mlflow.software-dev.ncsa.cloud
 %env MLFLOW_S3_ENDPOINT_URL=https://mlflow-minio-api.software-dev.ncsa.cloud
-%env AWS_ACCESS_KEY_ID=#set key id here
-%env AWS_SECRET_ACCESS_KEY=#set access key here
+%env AWS_ACCESS_KEY_ID=bengal1
+%env AWS_SECRET_ACCESS_KEY=leftfoot1
 ```
 
 ```python
@@ -847,6 +846,8 @@ def train_and_evaluate(params):
     
         model = xgb.XGBClassifier(**params) # define model with current parameters
         model = model.fit(features_train, labels_train) # train model
+        
+        mlflow.log_params(params)
 
         # predicting train set and validation set
         train_predicted = model.predict(features_train)
@@ -929,7 +930,7 @@ with mlflow.start_run(experiment_id=EXP_ID, run_name='xgboost_bdt_models'):
         space=trial_params,
         algo=tpe.suggest,
         trials=trials,
-        max_evals=20 # how many trials to run
+        max_evals=40 # how many trials to run
                           )
 ```
 
@@ -1042,6 +1043,17 @@ print("Random Assignment Jet Score = ", 0.375)
 ```
 
 ```python
+evaluation_matrix[0,:]
+```
+
+```python
+print("How many events are 100% correct: ", sum(scores==1)/len(scores), ", Random = ",sum(evaluation_matrix[0,:]==1)/12)
+print("How many events are 50% correct: ", sum(scores==0.5)/len(scores), ", Random = ",sum(evaluation_matrix[0,:]==0.5)/12)
+print("How many events are 25% correct: ", sum(scores==0.25)/len(scores), ", Random = ",sum(evaluation_matrix[0,:]==0.25)/12)
+print("How many events are 0% correct: ", sum(scores==0)/len(scores), ", Random = ",sum(evaluation_matrix[0,:]==0)/12)
+```
+
+```python
 # save model to json. this file can be used with the FIL backend in nvidia-triton!
 model.save_model("models/model_allcombinations_xgb.json")
 ```
@@ -1049,4 +1061,8 @@ model.save_model("models/model_allcombinations_xgb.json")
 ```python
 model = xgb.XGBClassifier()
 model.load_model("models/model_allcombinations_xgb.json")
+```
+
+```python
+
 ```

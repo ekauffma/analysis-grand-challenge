@@ -209,9 +209,10 @@ def get_features(jets, electrons, muons, permutations_dict):
 ```python
 def filterEvents(jets, electrons, muons, genpart, nmin, nmax, reconstructable=True):
 
-    selected_electrons = electrons[electrons.pt > 30]
-    selected_muons = muons[muons.pt > 30]
-    jet_filter = jets.pt > 30
+    selected_electrons = electrons[(electrons.pt > 30) & (np.abs(electrons.eta)<2.1) & (electrons.sip3d < 4) & (electrons.cutBased==4)]
+    selected_muons = events.Muon[(muons.pt > 30) & (np.abs(muons.eta)<2.1) & (muons.tightId) & 
+                                 (muons.sip3d < 4) & (muons.pfRelIso04_all < 0.15)]
+    jet_filter = (jets.pt > 30) & (np.abs(jets.eta) < 2.4)
     selected_jets = jets[jet_filter]
 
     # single lepton requirement
@@ -309,12 +310,12 @@ def filterEvents(jets, electrons, muons, genpart, nmin, nmax, reconstructable=Tr
 ```python
 # load model
 model = xgb.XGBClassifier()
-model.load_model("models/model_allcombinations_xgb.json")
+model.load_model("models/model_xgb_230131.json")
 ```
 
 ```python
 # load data 
-num_events = 250_000
+num_events = 400_000
 events = NanoEventsFactory.from_root("https://xrootd-local.unl.edu:1094//store/user/AGC/nanoAOD/TT_TuneCUETP8M1_13TeV-powheg-pythia8/cmsopendata2015_ttbar_19980_PU25nsData2015v1_76X_mcRun2_asymptotic_v12_ext3-v1_00000_0004.root", 
                                      treepath="Events", entry_stop=num_events).events()
 

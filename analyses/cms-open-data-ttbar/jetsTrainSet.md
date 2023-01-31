@@ -40,12 +40,8 @@ import logging
 
 import vector; vector.register_awkward()
 
-import cabinetry
-from coffea.nanoevents.schemas.base import BaseSchema, zip_forms
 from coffea.nanoevents import NanoAODSchema
 from coffea import processor
-from coffea.nanoevents.methods import base, vector
-from coffea.nanoevents import transforms
 import awkward as ak
 import numpy as np
 import hist
@@ -61,20 +57,18 @@ import utils
 import mlflow
 import mlflow.xgboost
 from mlflow.models.signature import infer_signature
-
-logging.getLogger("cabinetry").setLevel(logging.INFO)
 ```
 
 ```python
 ### GLOBAL CONFIGURATION
 
 # input files per process, set to e.g. 10 (smaller number = faster, want to use larger number for training)
-N_FILES_MAX_PER_SAMPLE = 1
+N_FILES_MAX_PER_SAMPLE = 30
 # set to "dask" for DaskExecutor, "futures" for FuturesExecutor
-EXEC = "dask"
+EXEC = "futures"
 
 # number of cores if using FuturesExecutor
-NUM_CORES = 16
+NUM_CORES = 4
 
 # chunk size to use
 CHUNKSIZE = 100_000
@@ -169,15 +163,6 @@ def get_training_set(jets, electrons, muons, labels):
         features, labels (flattened to remove event level)
     '''
     
-#     # permutations of jets to consider
-#     permutation_ind = np.array([[0,1,2,3],[0,1,3,2],[0,2,1,3],[0,3,1,2],
-#                                 [0,2,3,1],[0,3,2,1],[2,0,1,3],[3,0,1,2],
-#                                 [2,0,3,1],[3,0,2,1],[2,3,0,1],[3,2,0,1]])
-#     # corresponding jet labels to above permutations
-#     permutation_labels = np.array([[24,24,6,-6],[24,24,-6,6],[24,6,24,-6],[24,-6,24,6],
-#                                    [24,6,-6,24],[24,-6,6,24],[6,24,24,-6],[-6,24,24,6],
-#                                    [6,24,-6,24],[-6,24,6,24],[6,-6,24,24],[-6,6,24,24]])
-
     permutation_ind = np.array([[0,1,2,3],[0,1,3,2],[0,2,1,3],[0,2,3,1],
                                 [0,3,1,2],[0,3,2,1],[1,2,0,3],[1,2,3,0],
                                 [1,3,0,2],[1,3,2,0],[2,3,0,1],[2,3,1,0]])
@@ -295,9 +280,11 @@ class JetClassifier(processor_base):
         for pt_var in pt_variations:
             
             # filter electrons, muons, and jets by pT
-            selected_electrons = events.Electron[events.Electron.pt > 30]
-            selected_muons = events.Muon[events.Muon.pt > 30]
-            jet_filter = events.Jet.pt > 30
+            selected_electrons = events.Electron[(events.Electron.pt > 30) & (np.abs(events.Electron.eta)<2.1) & 
+                                                 (events.Electron.cutBased==4) & (events.Electron.sip3d < 4)]
+            selected_muons = events.Muon[(events.Muon.pt > 30) & (np.abs(events.Muon.eta)<2.1) & (events.Muon.tightId) & 
+                                         (events.Muon.sip3d < 4) & (events.Muon.pfRelIso04_all < 0.15)]
+            jet_filter = (events.Jet.pt > 30) & (np.abs(events.Jet.eta) < 2.4)
             selected_jets = events.Jet[jet_filter]
             selected_genpart = events.GenPart
             
@@ -385,13 +372,13 @@ output, metrics = run(fileset,
 ```
 
 ```python
-# import pickle
-# pickle.dump(output, open("output_1.p", "wb"))
+import pickle
+pickle.dump(output, open("output_5.p", "wb"))
 ```
 
 ```python
 import pickle
-output = pickle.load(open("output_2.p", "rb"))
+output = pickle.load(open("output_5.p", "rb"))
 ```
 
 ```python
@@ -767,17 +754,17 @@ labels_val = labels_val.reshape((12*labels_val.shape[0],))
 ```
 
 ```python
-features_train = features_train[:36000,:]
-labels_train = labels_train[:36000]
-which_combination_train = which_combination_train[:int(36000/12)]
+# features_train = features_train[:36000,:]
+# labels_train = labels_train[:36000]
+# which_combination_train = which_combination_train[:int(36000/12)]
 
-features_val = features_val[:6000,:]
-which_combination_val = which_combination_val[:int(6000/12)]
-labels_val = labels_val[:6000]
+# features_val = features_val[:6000,:]
+# which_combination_val = which_combination_val[:int(6000/12)]
+# labels_val = labels_val[:6000]
 
-features_test = features_test[:6000,:]
-labels_test = labels_test[:6000]
-which_combination_test = which_combination_test[:int(6000/12)]
+# features_test = features_test[:6000,:]
+# labels_test = labels_test[:6000]
+# which_combination_test = which_combination_test[:int(6000/12)]
 ```
 
 ```python
@@ -916,10 +903,6 @@ def train_and_evaluate(params):
     return {'status': STATUS_OK, 'loss': score_val}
 ```
 
-```python
-
-```
-
 ```python tags=[]
 trials = Trials()
 
@@ -930,7 +913,7 @@ with mlflow.start_run(experiment_id=EXP_ID, run_name='xgboost_bdt_models'):
         space=trial_params,
         algo=tpe.suggest,
         trials=trials,
-        max_evals=40 # how many trials to run
+        max_evals=20 # how many trials to run
                           )
 ```
 
@@ -1055,12 +1038,7 @@ print("How many events are 0% correct: ", sum(scores==0)/len(scores), ", Random 
 
 ```python
 # save model to json. this file can be used with the FIL backend in nvidia-triton!
-model.save_model("models/model_allcombinations_xgb.json")
-```
-
-```python
-model = xgb.XGBClassifier()
-model.load_model("models/model_allcombinations_xgb.json")
+model.save_model("models/model_xgb_230131.json")
 ```
 
 ```python

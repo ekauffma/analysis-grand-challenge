@@ -47,8 +47,6 @@ import logging
 import os
 import time
 
-os.environ['OPENBLAS_NUM_THREADS'] = '1'
-
 import vector; vector.register_awkward()
 
 import awkward as ak
@@ -121,7 +119,7 @@ AF = "coffea_casa"
 ### BENCHMARKING-SPECIFIC SETTINGS
 
 # chunk size to use
-CHUNKSIZE = 100_000
+CHUNKSIZE = 200_000
 
 # metadata to propagate through to metrics
 AF_NAME = "coffea_casa"  # "ssl-dev" allows for the switch to local data on /data
@@ -139,7 +137,7 @@ DISABLE_PROCESSING = False
 IO_FILE_PERCENT = 2.7
 
 # ML options
-MAX_N_JETS = 4 # maximum number of jets to consider in reconstruction BDT
+MAX_N_JETS = 6 # maximum number of jets to consider in reconstruction BDT
 
 MODEL = "models/model_allcombinations_xgb.json" # BDT json
 ```
@@ -420,19 +418,22 @@ class TtbarAnalysis(processor_base):
             ### event selection
             # very very loosely based on https://arxiv.org/abs/2006.13076
 
-            # pT > 25 GeV for leptons & jets
-            selected_electrons = events.Electron[events.Electron.pt > 30]
-            selected_muons = events.Muon[events.Muon.pt > 30]
-            jet_filter = events.Jet.pt * events[pt_var] > 30  # pT > 25 GeV for jets (scaled by systematic variations)
+            # cuts for leptons and jets
+            selected_electrons = events.Electron[(events.Electron.pt>30) & (np.abs(events.Electron.eta)<2.1) 
+                                                 & (events.Electron.sip3d<4) & (events.Electron.cutBased==4)]
+            selected_muons = events.Muon[(events.Muon.pt > 30) & (np.abs(events.Muon.eta)<2.1) 
+                                         & (events.Muon.tightId) & (events.Muon.sip3d < 4) 
+                                         & (events.Muon.pfRelIso04_all < 0.15)]
+            jet_filter = ((events.Jet.pt * events[pt_var]) > 30) & (np.abs(events.Jet.eta) < 2.4)
             selected_jets = events.Jet[jet_filter]
-
+       
             # single lepton requirement
             event_filters = ((ak.count(selected_electrons.pt, axis=1) + ak.count(selected_muons.pt, axis=1)) == 1)
             # at least four jets
             pt_var_modifier = events[pt_var] if "res" not in pt_var else events[pt_var][jet_filter]
             event_filters = event_filters & (ak.count(selected_jets.pt * pt_var_modifier, axis=1) >= 4)
             # at least one b-tagged jet ("tag" means score above threshold)
-            B_TAG_THRESHOLD = 0.5
+            B_TAG_THRESHOLD = 0.8
             event_filters = event_filters & (ak.sum(selected_jets.btagCSVV2 >= B_TAG_THRESHOLD, axis=1) >= 1)
 
             # apply event filters
@@ -766,21 +767,17 @@ all_histograms = all_histograms["hist"]
 ```python
 utils.set_style()
 
-all_histograms[120j::hist.rebin(2), :, "4j1b", :, "nominal"].stack("process")[::-1].project("deltaR").plot(stack=True, histtype="fill", linewidth=1, edgecolor="grey")
+all_histograms[120j::hist.rebin(2), :, "4j1b", :, "nominal"].stack("process").project("deltaR").plot(stack=True, histtype="fill", linewidth=1, edgecolor="grey")
 plt.legend(frameon=False)
 plt.title(">= 4 jets, 1 b-tag")
 plt.xlabel("deltaR");
 ```
 
 ```python
-all_histograms[:, :, "4j2b", :, "nominal"].stack("process")[::-1].project("deltaR").plot(stack=True, histtype="fill", linewidth=1,edgecolor="grey")
+all_histograms[:, :, "4j2b", :, "nominal"].stack("process").project("deltaR").plot(stack=True, histtype="fill", linewidth=1,edgecolor="grey")
 plt.legend(frameon=False)
 plt.title(">= 4 jets, >= 2 b-tags")
 plt.xlabel("deltaR");
-```
-
-```python
-
 ```
 
 ```python

@@ -149,13 +149,11 @@ def get_features(jets, electrons, muons, permutations_dict):
     features = np.zeros((sum(perm_counts),19))
     
     # grab lepton info
-    lepton_eta = (ak.sum(electrons.eta,axis=-1) + ak.sum(muons.eta,axis=-1))
-    lepton_phi = (ak.sum(electrons.phi,axis=-1) + ak.sum(muons.phi,axis=-1))
-    lepton_mass = (ak.sum(electrons.mass,axis=-1) + ak.sum(muons.mass,axis=-1))
+    leptons = ak.flatten(ak.concatenate((electrons, muons),axis=1),axis=-1)
 
     # delta R between top1 and lepton
-    features[:,0] = ak.flatten(np.sqrt((lepton_eta - jets[perms[...,3]].eta)**2 + 
-                                       (lepton_phi - jets[perms[...,3]].phi)**2)).to_numpy()
+    features[:,0] = ak.flatten(np.sqrt((leptons.eta - jets[perms[...,3]].eta)**2 + 
+                                       (leptons.phi - jets[perms[...,3]].phi)**2)).to_numpy()
 
     # delta R between the two W
     features[:,1] = ak.flatten(np.sqrt((jets[perms[...,0]].eta - jets[perms[...,1]].eta)**2 + 
@@ -168,7 +166,7 @@ def get_features(jets, electrons, muons, permutations_dict):
                                        (jets[perms[...,1]].phi - jets[perms[...,2]].phi)**2)).to_numpy()
 
     # delta phi between top1 and lepton
-    features[:,4] = ak.flatten(np.abs(lepton_phi - jets[perms[...,3]].phi)).to_numpy()
+    features[:,4] = ak.flatten(np.abs(leptons.phi - jets[perms[...,3]].phi)).to_numpy()
 
     # delta phi between the two W
     features[:,5] = ak.flatten(np.abs(jets[perms[...,0]].phi - jets[perms[...,1]].phi)).to_numpy()
@@ -179,15 +177,14 @@ def get_features(jets, electrons, muons, permutations_dict):
 
 
     # combined mass of top1 and lepton
-    features[:,8] = ak.flatten(lepton_mass + jets[perms[...,3]].mass).to_numpy()
+    features[:,8] = ak.flatten((leptons + jets[perms[...,3]]).mass).to_numpy()
 
     # combined mass of W
-    features[:,9] = ak.flatten(jets[perms[...,0]].mass + jets[perms[...,1]].mass).to_numpy()
+    features[:,9] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]]).mass).to_numpy()
 
     # combined mass of W and top2
-    features[:,10] = ak.flatten(jets[perms[...,0]].mass + 
-                                jets[perms[...,1]].mass + 
-                                jets[perms[...,2]].mass).to_numpy()
+    features[:,10] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
+                                 jets[perms[...,2]]).mass).to_numpy()
 
 
     # pt of every jet
@@ -209,10 +206,14 @@ def get_features(jets, electrons, muons, permutations_dict):
 ```python
 def filterEvents(jets, electrons, muons, genpart, nmin, nmax, reconstructable=True):
 
-    selected_electrons = electrons[(electrons.pt > 30) & (np.abs(electrons.eta)<2.1) & (electrons.sip3d < 4) & (electrons.cutBased==4)]
-    selected_muons = events.Muon[(muons.pt > 30) & (np.abs(muons.eta)<2.1) & (muons.tightId) & 
-                                 (muons.sip3d < 4) & (muons.pfRelIso04_all < 0.15)]
-    jet_filter = (jets.pt > 30) & (np.abs(jets.eta) < 2.4)
+    
+    selected_electrons = electrons[electrons.pt > 25]
+    # selected_electrons = electrons[(electrons.pt > 30) & (np.abs(electrons.eta)<2.1) & (electrons.sip3d < 4) & (electrons.cutBased==4)]
+    selected_muons = muons[muons.pt > 25]
+    # selected_muons = events.Muon[(muons.pt > 30) & (np.abs(muons.eta)<2.1) & (muons.tightId) & 
+    #                              (muons.sip3d < 4) & (muons.pfRelIso04_all < 0.15)]
+    jet_filter = (jets.pt > 25)
+    # jet_filter = (jets.pt > 30) & (np.abs(jets.eta) < 2.4)
     selected_jets = jets[jet_filter]
 
     # single lepton requirement
@@ -220,7 +221,7 @@ def filterEvents(jets, electrons, muons, genpart, nmin, nmax, reconstructable=Tr
     # at least four jets
     event_filters = event_filters & (ak.count(selected_jets.pt, axis=1) >= nmin)
     # at least one b-tagged jet ("tag" means score above threshold)
-    B_TAG_THRESHOLD = 0.8
+    B_TAG_THRESHOLD = 0.5
     event_filters = event_filters & (ak.sum(selected_jets.btagCSVV2 >= B_TAG_THRESHOLD, axis=1) >= 1)
 
     print("        ", 100*np.round(sum(event_filters)/num_events,4), "% of events survived event_filters")
@@ -310,12 +311,12 @@ def filterEvents(jets, electrons, muons, genpart, nmin, nmax, reconstructable=Tr
 ```python
 # load model
 model = xgb.XGBClassifier()
-model.load_model("models/model_xgb_230131.json")
+model.load_model("models/model_xgb_230206.json")
 ```
 
 ```python
 # load data 
-num_events = 400_000
+num_events = 100_000
 events = NanoEventsFactory.from_root("https://xrootd-local.unl.edu:1094//store/user/AGC/nanoAOD/TT_TuneCUETP8M1_13TeV-powheg-pythia8/cmsopendata2015_ttbar_19980_PU25nsData2015v1_76X_mcRun2_asymptotic_v12_ext3-v1_00000_0004.root", 
                                      treepath="Events", entry_stop=num_events).events()
 
@@ -749,4 +750,12 @@ ax.set_xlabel("MAX_N_JETS")
 ax.set_ylabel("Average # Jets Correct")
 ax.grid()
 ax.legend(["All Labels", "W", "top2", "top1"],bbox_to_anchor=(1.02,1))
+```
+
+```python
+
+```
+
+```python
+
 ```

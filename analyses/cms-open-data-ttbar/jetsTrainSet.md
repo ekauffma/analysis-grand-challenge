@@ -49,21 +49,24 @@ import json
 import matplotlib.pyplot as plt
 import uproot
 
-import torch
-import onnx
-
 import utils
 
+from dask.distributed import Client
+from sklearn.preprocessing import PowerTransformer
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+from sklearn.model_selection import ParameterSampler, train_test_split
 import mlflow
-import mlflow.xgboost
 from mlflow.models.signature import infer_signature
+from mlflow.tracking import MlflowClient
+from xgboost import XGBClassifier
+import onnx
 ```
 
 ```python
 ### GLOBAL CONFIGURATION
 
 # input files per process, set to e.g. 10 (smaller number = faster, want to use larger number for training)
-N_FILES_MAX_PER_SAMPLE = 30
+N_FILES_MAX_PER_SAMPLE = 1
 # set to "dask" for DaskExecutor, "futures" for FuturesExecutor
 EXEC = "futures"
 
@@ -75,11 +78,34 @@ CHUNKSIZE = 100_000
 
 # analysis facility: set to "coffea_casa" for coffea-casa environments, "EAF" for FNAL, "local" for local setups
 AF = "coffea_casa"
+
+# optional mlflow logging
+USE_MLFLOW = False
+```
+
+```python
+permutations_dict, labels_dict = utils.get_permutations_dict(4, include_labels=True)
+```
+
+```python
+# these matrices tell you the overlap between the predicted label (rows) and truth label (columns)
+# the "score" in each matrix entry is the number of jets which are assigned correctly
+evaluation_matrices = {} # overall event score
+
+for n in range(4,4+1):
+    print("n = ", n)
+    evaluation_matrix = np.zeros((len(permutations_dict[n]),len(permutations_dict[n])))
+    
+    for i in range(len(permutations_dict[n])):
+        for j in range(len(permutations_dict[n])):
+            evaluation_matrix[i,j]=sum(np.equal(labels_dict[n][i], labels_dict[n][j]))
+    
+    evaluation_matrices[n] = evaluation_matrix
 ```
 
 ```python
 ## functions for calculating features and labels for the BDT
-def training_filter(jets, electrons, muons, genparts):
+def training_filter(jets, electrons, muons, genparts, even):
     '''
     Filters events down to training set and calculates jet-level labels
     
@@ -145,11 +171,12 @@ def training_filter(jets, electrons, muons, genparts):
     electrons = electrons[training_event_filter]
     muons = muons[training_event_filter]
     labels = labels[training_event_filter]
+    even = even[training_event_filter]
     
-    return jets, electrons, muons, labels
+    return jets, electrons, muons, labels, even
     
 
-def get_training_set(jets, electrons, muons, labels):
+def get_training_set(jets, electrons, muons, labels, permutations_dict, labels_dict):
     '''
     Calculate features for each of the 12 combinations per event and calculates combination-level labels
     
@@ -163,78 +190,82 @@ def get_training_set(jets, electrons, muons, labels):
         features, labels (flattened to remove event level)
     '''
     
-    permutation_ind = np.array([[0,1,2,3],[0,1,3,2],[0,2,1,3],[0,2,3,1],
-                                [0,3,1,2],[0,3,2,1],[1,2,0,3],[1,2,3,0],
-                                [1,3,0,2],[1,3,2,0],[2,3,0,1],[2,3,1,0]])
-    permutation_labels = np.array([[24,24,6,-6],[24,24,-6,6],[24,6,24,-6],[24,-6,24,6],
-                                   [24,6,-6,24],[24,-6,6,24],[6,24,24,-6],[-6,24,24,6],
-                                   [6,24,-6,24],[-6,24,6,24],[6,-6,24,24],[-6,6,24,24]])
+    # calculate number of jets in each event
+    njet = ak.num(jets).to_numpy()
+    # don't consider every jet for events with high jet multiplicity
+    njet[njet>max(permutations_dict.keys())] = max(permutations_dict.keys())
+    # create awkward array of permutation indices
+    perms = ak.Array([permutations_dict[n] for n in njet])
+    perm_counts = ak.num(perms)
     
     
     #### calculate features ####
     
-    features = np.zeros((len(jets),12,19))
-                        
-    # grab lepton info
-    lepton_eta = (ak.sum(electrons.eta,axis=-1) + ak.sum(muons.eta,axis=-1)).to_numpy().reshape((len(jets),1))
-    lepton_phi = (ak.sum(electrons.phi,axis=-1) + ak.sum(muons.phi,axis=-1)).to_numpy().reshape((len(jets),1))
-    lepton_mass = (ak.sum(electrons.mass,axis=-1) + ak.sum(muons.mass,axis=-1)).to_numpy().reshape((len(jets),1))
+    #### calculate features ####
+    features = np.zeros((sum(perm_counts),19))
     
+    # grab lepton info
+    leptons = ak.flatten(ak.concatenate((electrons, muons),axis=1),axis=-1)
+
     # delta R between top1 and lepton
-    features[:,:,0] = np.sqrt((lepton_eta - jets[:,permutation_ind[:,3]].eta)**2 + 
-                              (lepton_phi - jets[:,permutation_ind[:,3]].phi)**2)
+    features[:,0] = ak.flatten(np.sqrt((leptons.eta - jets[perms[...,3]].eta)**2 + 
+                                       (leptons.phi - jets[perms[...,3]].phi)**2)).to_numpy()
 
     # delta R between the two W
-    features[:,:,1] = np.sqrt((jets[:,permutation_ind[:,0]].eta - jets[:,permutation_ind[:,1]].eta)**2 + 
-                              (jets[:,permutation_ind[:,0]].phi - jets[:,permutation_ind[:,1]].phi)**2)
+    features[:,1] = ak.flatten(np.sqrt((jets[perms[...,0]].eta - jets[perms[...,1]].eta)**2 + 
+                                       (jets[perms[...,0]].phi - jets[perms[...,1]].phi)**2)).to_numpy()
 
     # delta R between W and top2
-    features[:,:,2] = np.sqrt((jets[:,permutation_ind[:,0]].eta - jets[:,permutation_ind[:,2]].eta)**2 + 
-                              (jets[:,permutation_ind[:,0]].phi - jets[:,permutation_ind[:,2]].phi)**2)
-    features[:,:,3] = np.sqrt((jets[:,permutation_ind[:,0]].eta - jets[:,permutation_ind[:,2]].eta)**2 + 
-                              (jets[:,permutation_ind[:,1]].phi - jets[:,permutation_ind[:,2]].phi)**2)
+    features[:,2] = ak.flatten(np.sqrt((jets[perms[...,0]].eta - jets[perms[...,2]].eta)**2 + 
+                                       (jets[perms[...,0]].phi - jets[perms[...,2]].phi)**2)).to_numpy()
+    features[:,3] = ak.flatten(np.sqrt((jets[perms[...,1]].eta - jets[perms[...,2]].eta)**2 + 
+                                       (jets[perms[...,1]].phi - jets[perms[...,2]].phi)**2)).to_numpy()
 
     # delta phi between top1 and lepton
-    features[:,:,4] = np.abs(lepton_phi - jets[:,permutation_ind[:,3]].phi)
+    features[:,4] = ak.flatten(np.abs(leptons.phi - jets[perms[...,3]].phi)).to_numpy()
 
     # delta phi between the two W
-    features[:,:,5] = np.abs(jets[:,permutation_ind[:,0]].phi - jets[:,permutation_ind[:,1]].phi)
+    features[:,5] = ak.flatten(np.abs(jets[perms[...,0]].phi - jets[perms[...,1]].phi)).to_numpy()
 
     # delta phi between W and top2
-    features[:,:,6] = np.abs(jets[:,permutation_ind[:,0]].phi - jets[:,permutation_ind[:,2]].phi)
-    features[:,:,7] = np.abs(jets[:,permutation_ind[:,1]].phi - jets[:,permutation_ind[:,2]].phi)
+    features[:,6] = ak.flatten(np.abs(jets[perms[...,0]].phi - jets[perms[...,2]].phi)).to_numpy()
+    features[:,7] = ak.flatten(np.abs(jets[perms[...,1]].phi - jets[perms[...,2]].phi)).to_numpy()
+
 
     # combined mass of top1 and lepton
-    features[:,:,8] = lepton_mass + jets[:,permutation_ind[:,3]].mass
+    features[:,8] = ak.flatten((leptons + jets[perms[...,3]]).mass).to_numpy()
 
     # combined mass of W
-    features[:,:,9] = jets[:,permutation_ind[:,0]].mass + jets[:,permutation_ind[:,1]].mass
+    features[:,9] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]]).mass).to_numpy()
 
     # combined mass of W and top2
-    features[:,:,10] = jets[:,permutation_ind[:,0]].mass + jets[:,permutation_ind[:,1]].mass + jets[:,permutation_ind[:,2]].mass
+    features[:,10] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
+                                 jets[perms[...,2]]).mass).to_numpy()
+
 
     # pt of every jet
-    features[:,:,11] = jets[:,permutation_ind[:,0]].pt
-    features[:,:,12] = jets[:,permutation_ind[:,1]].pt
-    features[:,:,13] = jets[:,permutation_ind[:,2]].pt
-    features[:,:,14] = jets[:,permutation_ind[:,3]].pt
+    features[:,11] = ak.flatten(jets[perms[...,0]].pt).to_numpy()
+    features[:,12] = ak.flatten(jets[perms[...,1]].pt).to_numpy()
+    features[:,13] = ak.flatten(jets[perms[...,2]].pt).to_numpy()
+    features[:,14] = ak.flatten(jets[perms[...,3]].pt).to_numpy()
+
 
     # mass of every jet
-    features[:,:,15] = jets[:,permutation_ind[:,0]].mass
-    features[:,:,16] = jets[:,permutation_ind[:,1]].mass
-    features[:,:,17] = jets[:,permutation_ind[:,2]].mass
-    features[:,:,18] = jets[:,permutation_ind[:,3]].mass
-
+    features[:,15] = ak.flatten(jets[perms[...,0]].mass).to_numpy()
+    features[:,16] = ak.flatten(jets[perms[...,1]].mass).to_numpy()
+    features[:,17] = ak.flatten(jets[perms[...,2]].mass).to_numpy()
+    features[:,18] = ak.flatten(jets[perms[...,3]].mass).to_numpy()
     
     #### calculate combination-level labels ####
+    permutation_labels = np.array(labels_dict[4])
     
     # which combination does the truth label correspond to?
     which_combination = np.zeros(len(jets), dtype=int)
     # no correct matches
     which_anti_combination = np.zeros(labels.shape[0], dtype=int)
     for i in range(12):
-        which_combination[(labels[:]==permutation_labels[i,:]).all(1)] = i
-        which_anti_combination[np.invert((labels[:]==permutation_labels[i,:]).any(1))] = i
+        which_combination[(labels==permutation_labels[i,:]).all(1)] = i
+        which_anti_combination[np.invert((labels==permutation_labels[i,:]).any(1))] = i
 
     # convert to combination-level truth label (-1, 0 or 1)
     which_combination = list(zip(range(len(jets),), which_combination))
@@ -249,8 +280,7 @@ def get_training_set(jets, electrons, muons, labels):
         
     #### flatten to combinations (easy to unflatten since each event always has 12 combinations) ####
     labels = truth_labels.reshape((truth_labels.shape[0]*truth_labels.shape[1],1))
-    features = features.reshape((features.shape[0]*features.shape[1],features.shape[2]))    
-        
+    
     return features, labels, which_combination
 ```
 
@@ -261,8 +291,10 @@ The processor returns the training features and labels we will use in our BDT
 ```python
 processor_base = processor.ProcessorABC
 class JetClassifier(processor_base):
-    def __init__(self):
+    def __init__(self, permutations_dict, labels_dict):
         super().__init__()
+        self.permutations_dict = permutations_dict
+        self.labels_dict = labels_dict
     
     def process(self, events):
         
@@ -287,13 +319,14 @@ class JetClassifier(processor_base):
             jet_filter = (events.Jet.pt > 30) & (np.abs(events.Jet.eta) < 2.4)
             selected_jets = events.Jet[jet_filter]
             selected_genpart = events.GenPart
+            even = (events.event%2==0)
             
             # single lepton requirement
             event_filters = ((ak.count(selected_electrons.pt, axis=1) + ak.count(selected_muons.pt, axis=1)) == 1)
             # require at least 4 jets
             event_filters = event_filters & (ak.count(selected_jets.pt, axis=1) >= 4)
             # require at least one jet above B_TAG_THRESHOLD
-            B_TAG_THRESHOLD = 0.8
+            B_TAG_THRESHOLD = 0.5
             event_filters = event_filters & (ak.sum(selected_jets.btagCSVV2 >= B_TAG_THRESHOLD, axis=1) >= 1)
             
             # apply event filters
@@ -302,6 +335,7 @@ class JetClassifier(processor_base):
             selected_muons = selected_muons[event_filters]
             selected_jets = selected_jets[event_filters]
             selected_genpart = selected_genpart[event_filters]
+            even = even[event_filters]
             
             ### only consider 4j2b region
             region_filter = ak.sum(selected_jets.btagCSVV2 > B_TAG_THRESHOLD, axis=1) >= 2 # at least two b-tagged jets
@@ -309,20 +343,35 @@ class JetClassifier(processor_base):
             selected_electrons_region = selected_electrons[region_filter]
             selected_muons_region = selected_muons[region_filter]
             selected_genpart_region = selected_genpart[region_filter]
+            even = even[region_filter]
             
             # filter events and calculate labels
-            jets, electrons, muons, labels = training_filter(selected_jets_region, 
-                                                             selected_electrons_region, 
-                                                             selected_muons_region, 
-                                                             selected_genpart_region)
+            jets, electrons, muons, labels, even = training_filter(selected_jets_region, 
+                                                                   selected_electrons_region, 
+                                                                   selected_muons_region, 
+                                                                   selected_genpart_region,
+                                                                   even)
             
             # calculate features and labels
-            features, labels, which_combination = get_training_set(jets, electrons, muons, labels)
+            features, labels, which_combination = get_training_set(jets, electrons, muons, labels,
+                                                                   self.permutations_dict, self.labels_dict)
     
+            # calculate mbjj
+            # reconstruct hadronic top as bjj system with largest pT
+            # the jet energy scale / resolution effect is not propagated to this observable at the moment
+            trijet = ak.combinations(jets, 3, fields=["j1", "j2", "j3"])  # trijet candidates
+            trijet["p4"] = trijet.j1 + trijet.j2 + trijet.j3  # calculate four-momentum of tri-jet system
+            trijet["max_btag"] = np.maximum(trijet.j1.btagCSVV2, np.maximum(trijet.j2.btagCSVV2, trijet.j3.btagCSVV2))
+            trijet = trijet[trijet.max_btag > B_TAG_THRESHOLD]  # at least one-btag in trijet candidates
+            # pick trijet candidate with largest pT and calculate mass of system
+            trijet_mass = trijet["p4"][ak.argmax(trijet.p4.pt, axis=1, keepdims=True)].mass
+            observable = ak.flatten(trijet_mass)
+            
         output = {"nevents": {events.metadata["dataset"]: len(events)},
                   "features": {events.metadata["dataset"]: features.tolist()},
                   "labels": {events.metadata["dataset"]: labels.tolist()},
-                  "which_combination": {events.metadata["dataset"]: which_combination},}
+                  "observable": {events.metadata["dataset"]: observable.to_list()},
+                  "even": {events.metadata["dataset"]: even.to_list()}}
             
         return output
         
@@ -353,14 +402,15 @@ fileset
 ### Execute the data delivery pipeline
 
 ```python tags=[]
-schema = NanoAODSchema
+NanoAODSchema.warn_missing_crossrefs = False
 
 if EXEC == "futures":
     executor = processor.FuturesExecutor(workers=NUM_CORES)
 elif EXEC == "dask":
     executor = processor.DaskExecutor(client=utils.get_client(AF))
     
-run = processor.Runner(executor=executor, schema=schema, savemetrics=True, metadata_cache={}, chunksize=CHUNKSIZE)
+run = processor.Runner(executor=executor, schema=NanoAODSchema, savemetrics=True, metadata_cache={}, 
+                       chunksize=CHUNKSIZE)
 
 # preprocess
 filemeta = run.preprocess(fileset, treename="Events")
@@ -368,24 +418,27 @@ filemeta = run.preprocess(fileset, treename="Events")
 # process
 output, metrics = run(fileset, 
                       "Events", 
-                      processor_instance = JetClassifier())
+                      processor_instance = JetClassifier(permutations_dict, labels_dict))
 ```
 
 ```python
 import pickle
-pickle.dump(output, open("output_5.p", "wb"))
+pickle.dump(output, open("output_temp.p", "wb"))
 ```
 
 ```python
 import pickle
-output = pickle.load(open("output_5.p", "rb"))
+output = pickle.load(open("output_temp.p", "rb"))
 ```
 
 ```python
 # grab features and labels and convert to np array
 features = np.array(output['features']['ttbar__nominal'])
 labels = np.array(output['labels']['ttbar__nominal'])
+even = np.array(output['even']['ttbar__nominal'])
+
 labels = labels.reshape((len(labels),))
+even = np.repeat(even, 12)
 ```
 
 ```python
@@ -518,9 +571,9 @@ fig.show()
 
 # binning
 combinedmass_low = 0.0
-combinedmass_high = 100.0
+combinedmass_high = 1500.0
 combinedmass_numbins = 200
-legend_list = ["All Matches Correct", "Some Matches Correct", "No Matches Correct"]
+legend_list = ["All Matches Correct", "Some Matches Correct", "No Matches Correct", "Jet Triplet with Largest pT"]
 
 # define histogram
 h = hist.Hist(
@@ -540,27 +593,28 @@ h.fill(combinedmass = none_correct[:,9], category="W_W", truthlabel="No Matches 
 h.fill(combinedmass = all_correct[:,10], category="top2_W_W", truthlabel="All Matches Correct")
 h.fill(combinedmass = some_correct[:,10], category="top2_W_W", truthlabel="Some Matches Correct")
 h.fill(combinedmass = none_correct[:,10], category="top2_W_W", truthlabel="No Matches Correct")
+h.fill(combinedmass = output["observable"]["ttbar__nominal"], category="top2_W_W", truthlabel="Jet Triplet with Largest pT")
 
 # make plots
 fig,ax = plt.subplots(1,1,figsize=(8,4))
 h[:, :, "top1_lepton"].plot(density=True, ax=ax)
-ax.legend(legend_list)
+ax.legend(legend_list[:-1])
 ax.set_title("Combined mass of top1 jet and lepton")
-ax.set_xlim([0,30])
+ax.set_xlim([0,400])
 fig.show()
 
 fig,ax = plt.subplots(1,1,figsize=(8,4))
 h[:, :, "W_W"].plot(density=True, ax=ax)
-ax.legend(legend_list)
+ax.legend(legend_list[:-1])
 ax.set_title("Combined mass of the two W jets")
-ax.set_xlim([0,60])
+ax.set_xlim([0,400])
 fig.show()
 
 fig,ax = plt.subplots(1,1,figsize=(8,4))
-h[0j::hist.rebin(2), :, "top2_W_W"].plot(density=True, ax=ax)
+h[:, :, "top2_W_W"].plot(density=True, ax=ax)
 ax.legend(legend_list)
 ax.set_title("Combined mass of W jets and top2 jet")
-ax.set_xlim([10,80])
+ax.set_xlim([0,600])
 fig.show()
 ```
 
@@ -671,131 +725,233 @@ fig.show()
 
 # Model Optimization
 
-The model used here is `xgboost`'s gradient-boosted decision tree (`XGBClassifier`). `hyperopt` is used to optimize the model parameters. A grid search to optimize model parameters can be a bit inconvenient, so `hyperopt`'s `fmin` function uses Bayesian methods to create a probabilistic model of the given parameter space and selects new values based on prior trials.
-
-The workflow outlined here is inspired by https://towardsdatascience.com/training-xgboost-with-mlflow-experiments-and-hyperopt-c0d3a4994ea6.
-
-TODO: Add tracking in `MLFlow`
+The model used here is `xgboost`'s gradient-boosted decision tree (`XGBClassifier`). Hyperparameter optimization is performed using random selection from a sample space of hyperparameters then testing model fits in a parallelized manner using `dask`. Optional `mlflow` logging is included.
 
 ```python
-import xgboost as xgb
-from hyperopt import hp, STATUS_OK, fmin, tpe, Trials
-from hyperopt.pyll.base import scope
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import PowerTransformer
-from sklearn.metrics import (
-    accuracy_score,
-    precision_score,
-    recall_score,
-    f1_score,
-    roc_auc_score
-)
-```
-
-```python
+# grab features and labels and convert to np array
 features = np.array(output['features']['ttbar__nominal'])
 labels = np.array(output['labels']['ttbar__nominal'])
+even = np.array(output['even']['ttbar__nominal'])
+
 labels = labels.reshape((len(labels),))
-# which_combination = np.array(output['which_combination']['ttbar__nominal'])[:,1]
+even = np.repeat(even, 12)
 
-# only consider combinations that are 100% correct or 0% correct
-# features = features[(labels==1) | (labels==0)]
-# labels = labels[(labels==1) | (labels==0)]
+labels[labels==-1]=0 # consider all combination (partially correct is same as 0% correct for training)
 
-# consider all combination (partially correct is same as 0% correct for training)
-labels[labels==-1]=0
+features_even = features[even]
+labels_even = labels[even]
+
+features_odd = features[np.invert(even)]
+labels_odd = labels[np.invert(even)]
 ```
 
 ```python
 ### separate data into train/val/testr ###
 
 RANDOM_SEED = 5
-TRAIN_RATIO = 0.9 # approx. fraction of data to use for training (round to nearest multiple of 12)
-TRAIN_SIZE = int(TRAIN_RATIO*(features.shape[0]/12))*12
-
-features_unflattened = features.reshape((int(features.shape[0]/12),12,19))
-labels_unflattened = labels.reshape((int(features.shape[0]/12),12))
-
-features_train_and_val, features_test, labels_train_and_val, labels_test = train_test_split(features_unflattened, 
-                                                                                            labels_unflattened, 
-                                                                                            train_size=TRAIN_RATIO, 
-                                                                                            random_state=RANDOM_SEED)
-
-print("features_train_and_val.shape = ", features_train_and_val.shape)
-print("labels_train_and_val.shape = ", labels_train_and_val.shape)
-print("features_test.shape = ", features_test.shape)
-print("labels_test.shape = ", labels_test.shape)
-
-which_combination_test = np.where(labels_test==1)[1]
-features_test = features_test.reshape((12*features_test.shape[0],19))
-labels_test = labels_test.reshape((12*labels_test.shape[0],))
-
 TRAIN_RATIO = 0.9
-features_train, features_val, labels_train, labels_val = train_test_split(features_train_and_val, 
-                                                                          labels_train_and_val, 
-                                                                          train_size=TRAIN_RATIO,
-                                                                          # stratify=labels_train_and_val, # makes sure sig/bkg is balanced since we have more bkg as sig
-                                                                          random_state=RANDOM_SEED)
+
+# separate even into train/val
+features_even_unflattened = features_even.reshape((int(features_even.shape[0]/12),12,19))
+labels_even_unflattened = labels_even.reshape((int(features_even.shape[0]/12),12))
+
+features_train_even, features_val_even, labels_train_even, labels_val_even = train_test_split(features_even_unflattened, 
+                                                                                              labels_even_unflattened, 
+                                                                                              train_size=TRAIN_RATIO, 
+                                                                                              random_state=RANDOM_SEED)
+
+print("features_train_even.shape = ", features_train_even.shape)
+print("labels_train_even.shape = ", labels_train_even.shape)
+print("features_val_even.shape = ", features_val_even.shape)
+print("labels_val_even.shape = ", labels_val_even.shape)
+
+which_combination_train_even = np.where(labels_train_even==1)[1]
+features_train_even = features_train_even.reshape((12*features_train_even.shape[0],19))
+labels_train_even = labels_train_even.reshape((12*labels_train_even.shape[0],))
+
+which_combination_val_even = np.where(labels_val_even==1)[1]
+features_val_even = features_val_even.reshape((12*features_val_even.shape[0],19))
+labels_val_even = labels_val_even.reshape((12*labels_val_even.shape[0],))
 
 
-print()
-print("features_train.shape = ", features_train.shape)
-print("labels_train.shape = ", labels_train.shape)
-print("features_val.shape = ", features_val.shape)
-print("labels_val.shape = ", labels_val.shape)
+# separate odd into train/val
+features_odd_unflattened = features_odd.reshape((int(features_odd.shape[0]/12),12,19))
+labels_odd_unflattened = labels_odd.reshape((int(features_odd.shape[0]/12),12))
 
-which_combination_train = np.where(labels_train==1)[1]
-features_train = features_train.reshape((12*features_train.shape[0],19))
-labels_train = labels_train.reshape((12*labels_train.shape[0],))
+features_train_odd, features_val_odd, labels_train_odd, labels_val_odd = train_test_split(features_odd_unflattened, 
+                                                                                          labels_odd_unflattened, 
+                                                                                          train_size=TRAIN_RATIO, 
+                                                                                          random_state=RANDOM_SEED)
 
-which_combination_val = np.where(labels_val==1)[1]
-features_val = features_val.reshape((12*features_val.shape[0],19))
-labels_val = labels_val.reshape((12*labels_val.shape[0],))
-```
+print("features_train_odd.shape = ", features_train_odd.shape)
+print("labels_train_odd.shape = ", labels_train_odd.shape)
+print("features_val_odd.shape = ", features_val_odd.shape)
+print("labels_val_odd.shape = ", labels_val_odd.shape)
 
-```python
-# features_train = features_train[:36000,:]
-# labels_train = labels_train[:36000]
-# which_combination_train = which_combination_train[:int(36000/12)]
+which_combination_train_odd = np.where(labels_train_odd==1)[1]
+features_train_odd = features_train_odd.reshape((12*features_train_odd.shape[0],19))
+labels_train_odd = labels_train_odd.reshape((12*labels_train_odd.shape[0],))
 
-# features_val = features_val[:6000,:]
-# which_combination_val = which_combination_val[:int(6000/12)]
-# labels_val = labels_val[:6000]
-
-# features_test = features_test[:6000,:]
-# labels_test = labels_test[:6000]
-# which_combination_test = which_combination_test[:int(6000/12)]
+which_combination_val_odd = np.where(labels_val_odd==1)[1]
+features_val_odd = features_val_odd.reshape((12*features_val_odd.shape[0],19))
+labels_val_odd = labels_val_odd.reshape((12*labels_val_odd.shape[0],))
 ```
 
 ```python
 # preprocess features so that they are more Gaussian-like
 power = PowerTransformer(method='yeo-johnson', standardize=True)
 
-features_train = power.fit_transform(features_train)
-features_val =power.transform(features_val)
-features_test = power.transform(features_test)
+features_train_even = power.fit_transform(features_train_even)
+features_val_even = power.transform(features_val_even)
+features_train_odd = power.transform(features_train_odd)
+features_val_odd = power.transform(features_val_odd)
 ```
 
 ```python
-# hyperopt trial values
-trial_params = {
-    'max_depth': scope.int(hp.quniform('max_depth', 2, 20, 1)), # maximum depth of BDT
-    'n_estimators': scope.int(hp.uniform('n_estimators', 50, 700)), # number of gradient boosts applied to tree
-    'learning_rate': hp.loguniform('learning_rate', -5, 0), # learning rate of boosts
-    'min_child_weight': hp.loguniform('min_child_weight', -1, 7), # minimum weight needed in child node
-    'reg_alpha': hp.loguniform('reg_alpha', -10, 10),
-    'reg_lambda': hp.loguniform('reg_lambda', -10, 10),
-    'gamma': hp.loguniform('gamma', -10, 10), # minimum loss reduction for a partition to occur
-    'booster': 'gbtree', # use a boosted decision tree
-    'random_state': RANDOM_SEED, # use same model initialization for each trial
-    # 'eval_metric': 'auc', # hyperopt will attempt to maximize AUC
-               }
+sampler = ParameterSampler({'max_depth': np.arange(2,30,2,dtype=int), 
+                            'n_estimators': np.arange(50,700,20,dtype=int), 
+                            'learning_rate': np.logspace(-5, -1, 10),
+                            'min_child_weight': np.logspace(-1, 2, 20), 
+                            'reg_lambda': [0, 0.25, 0.5, 0.75, 1], 
+                            'reg_alpha': [0, 0.25, 0.5, 0.75, 1],
+                            'gamma': np.logspace(-4, 1, 20),}, 
+                            n_iter = 50, 
+                            random_state=34) 
+
+samples = list(sampler)
 ```
 
 ```python
-permutation_labels = np.array([[24,24,6,-6],[24,24,-6,6],[24,6,24,-6],[24,-6,24,6],
-                               [24,6,-6,24],[24,-6,6,24],[6,24,24,-6],[-6,24,24,6],
-                               [6,24,-6,24],[-6,24,6,24],[6,-6,24,24],[-6,6,24,24]])
+for i in range(len(samples)):
+    samples[i]['trial_num'] = i
+samples[0]
+```
+
+```python
+def fit_model(params, 
+              features_train, 
+              labels_train, 
+              which_combination_train,
+              features_val, 
+              labels_val, 
+              which_combination_val,
+              evaluation_matrix,
+              USE_MLFLOW=False): 
+    
+    trial_num = params["trial_num"]
+    
+    if USE_MLFLOW:
+        mlflowclient = MlflowClient()
+        run = mlflowclient.create_run(experiment_id="9", run_name=f"run-{trial_num}") #run_name=f"run-{trial_num}", nested=True): 
+        
+        for param, value in params.items(): 
+            mlflowclient.log_param(run.info.run_id, param, value) 
+
+    params_copy = params.copy()
+    params_copy.pop("trial_num") # remove trial_num as it is not a parameter for the BDT
+            
+    # initialize model with current parameters
+    model = XGBClassifier(random_state=5, booster='gbtree', **params) 
+        
+    # fit model to training sample
+    model.fit(features_train, labels_train)
+    
+    # predictions using trained model
+    predict_train = model.predict(features_train)
+    predict_proba_train = model.predict_proba(features_train)[:, 1]
+    
+    # calculated jet accuracy for training sample
+    predict_proba_train_evt = predict_proba_train.reshape((int(len(predict_proba_train)/12),12))
+    predicted_combination_train = np.argmax(predict_proba_train_evt,axis=1)
+
+    scores = np.zeros(len(which_combination_train))
+    zipped = list(zip(which_combination_train.tolist(), predicted_combination_train.tolist()))
+    for i in range(len(which_combination_train)):
+        scores[i] = evaluation_matrix[zipped[i]]
+    jet_accuracy_train = -sum(scores)/len(scores)
+        
+    # log training metrics
+    if USE_MLFLOW:
+        mlflowclient.log_metric(run.info.run_id, 'train_accuracy', 
+                                accuracy_score(labels_train, predict_train))
+        mlflowclient.log_metric(run.info.run_id, 'train_precision', 
+                                precision_score(labels_train, predict_train, zero_division=0))
+        mlflowclient.log_metric(run.info.run_id, 'train_recall', 
+                                recall_score(labels_train, predict_train))
+        mlflowclient.log_metric(run.info.run_id, 'train_f1', 
+                                f1_score(labels_train, predict_train))
+        mlflowclient.log_metric(run.info.run_id, 'train_roc_auc', 
+                                roc_auc_score(labels_train, predict_proba_train))
+        mlflowclient.log_metric(run.info.run_id, 'train_jet_accuracy', jet_accuracy_train)
+        
+    # predictions using trained model
+    predict_val= model.predict(features_val)
+    predict_proba_val = model.predict_proba(features_val)[:, 1]
+    
+    # calculated jet accuracy for validation sample
+    predict_proba_val_evt = predict_proba_val.reshape((int(len(predict_proba_val)/12),12))
+    predicted_combination_val = np.argmax(predict_proba_val_evt,axis=1)
+
+    scores = np.zeros(len(which_combination_val))
+    zipped = list(zip(which_combination_val.tolist(), predicted_combination_val.tolist()))
+    for i in range(len(which_combination_val)):
+        scores[i] = evaluation_matrix[zipped[i]]
+    jet_accuracy_val = -sum(scores)/len(scores)
+    
+    if USE_MLFLOW:
+        mlflowclient.log_metric(run.info.run_id, 'val_accuracy', 
+                                accuracy_score(labels_val, predict_val))
+        mlflowclient.log_metric(run.info.run_id, 'val_precision', 
+                                precision_score(labels_val, predict_val, zero_division=0))
+        mlflowclient.log_metric(run.info.run_id, 'val_recall', 
+                                recall_score(labels_val, predict_val))
+        mlflowclient.log_metric(run.info.run_id, 'val_f1', 
+                                f1_score(labels_val, predict_val))
+        mlflowclient.log_metric(run.info.run_id, 'val_roc_auc', 
+                                roc_auc_score(labels_val, predict_proba_val))
+        mlflowclient.log_metric(run.info.run_id, 'val_jet_accuracy', jet_accuracy_val)
+    
+        # logging model
+        signature = infer_signature(features_train, predict_train)
+        # mlflow.xgboost.log_model(model, f'sigbkg_bdt_{trial_num}', signature=signature)
+
+        # explicitly close client
+        mlflowclient.set_terminated(run.info.run_id)
+        
+    return jet_accuracy_val
+```
+
+```python
+# to transfer env. variables to workers
+def initialize_mlflow(): 
+
+    os.environ['MLFLOW_TRACKING_URI'] = "https://mlflow.software-dev.ncsa.cloud"
+    os.environ['MLFLOW_S3_ENDPOINT_URL'] = "https://mlflow-minio-api.software-dev.ncsa.cloud"
+    os.environ['AWS_ACCESS_KEY_ID'] = ""
+    os.environ['AWS_SECRET_ACCESS_KEY'] = ""
+    
+    mlflow.set_tracking_uri('https://mlflow.software-dev.ncsa.cloud') 
+    mlflow.set_experiment("agc-demo-example")
+```
+
+```python
+
+```
+
+```python
+
+```
+
+```python
+
+```
+
+```python
+
+```
+
+```python
+permutation_labels = np.array(labels_dict[4])
 ```
 
 ```python
@@ -814,7 +970,7 @@ EXPERIMENT_ID = mlflow.set_experiment('optimize-reconstruction-bdt-00')
 ```python
 %env MLFLOW_TRACKING_URI=https://mlflow.software-dev.ncsa.cloud
 %env MLFLOW_S3_ENDPOINT_URL=https://mlflow-minio-api.software-dev.ncsa.cloud
-%env AWS_ACCESS_KEY_ID=bengal1
+%env AWS_ACCESS_KEY_ID=
 %env AWS_SECRET_ACCESS_KEY=leftfoot1
 ```
 
@@ -1026,10 +1182,6 @@ print("Random Assignment Jet Score = ", 0.375)
 ```
 
 ```python
-evaluation_matrix[0,:]
-```
-
-```python
 print("How many events are 100% correct: ", sum(scores==1)/len(scores), ", Random = ",sum(evaluation_matrix[0,:]==1)/12)
 print("How many events are 50% correct: ", sum(scores==0.5)/len(scores), ", Random = ",sum(evaluation_matrix[0,:]==0.5)/12)
 print("How many events are 25% correct: ", sum(scores==0.25)/len(scores), ", Random = ",sum(evaluation_matrix[0,:]==0.25)/12)
@@ -1038,9 +1190,5 @@ print("How many events are 0% correct: ", sum(scores==0)/len(scores), ", Random 
 
 ```python
 # save model to json. this file can be used with the FIL backend in nvidia-triton!
-model.save_model("models/model_xgb_230131.json")
-```
-
-```python
-
+model.save_model("models/model_xgb_230206.json")
 ```

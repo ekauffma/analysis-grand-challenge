@@ -14,6 +14,9 @@ from servicex import ServiceXDataset
 import particle
 from anytree import NodeMixin, RenderTree, Node
 
+import awkward as ak
+import numpy as np
+
 
 def get_client(af="coffea_casa"):
     if af == "coffea_casa":
@@ -252,3 +255,59 @@ def printTrees(particles):
             print("%s%s" % (pre, node.name))
             
     return
+
+
+def get_permutations_dict(MAX_N_JETS, include_labels=False):
+    
+    # calculate the dictionary of permutations for each number of jets
+    permutations_dict = {}
+    for n in range(4,MAX_N_JETS+1):
+        test = ak.Array(range(n))
+        unzipped = ak.unzip(ak.argcartesian([test]*4,axis=0))
+
+        combos = ak.combinations(ak.Array(range(4)), 2, axis=0)
+        different = unzipped[combos[0]["0"]]!=unzipped[combos[0]["1"]]
+        for i in range(1,len(combos)):
+            different = different & (unzipped[combos[i]["0"]]!=unzipped[combos[i]["1"]])
+
+        permutations = ak.zip([test[unzipped[i][different]] for i in range(len(unzipped))],
+                              depth_limit=1).tolist()
+
+
+        permutations = ak.concatenate([test[unzipped[i][different]][..., np.newaxis] 
+                                       for i in range(len(unzipped))], 
+                                      axis=1).to_list()
+
+        permutations_dict[n] = permutations
+
+    # for each permutation, calculate the corresponding label
+    labels_dict = {}
+    for n in range(4,MAX_N_JETS+1):
+
+        current_labels = []
+        for inds in permutations_dict[n]:
+
+            inds = np.array(inds)
+            current_label = 100*np.ones(n)
+            current_label[inds[:2]] = 24
+            current_label[inds[2]] = 6
+            current_label[inds[3]] = -6
+            current_labels.append(current_label.tolist())
+
+        labels_dict[n] = current_labels
+
+    # get rid of duplicates since we consider W jets to be exchangeable
+    # (halves the number of permutations we consider)
+    for n in range(4,MAX_N_JETS+1):
+        res = []
+        for idx, val in enumerate(labels_dict[n]):
+            if val in labels_dict[n][:idx]:
+                res.append(idx)
+        labels_dict[n] = np.array(labels_dict[n])[res].tolist()
+        permutations_dict[n] = np.array(permutations_dict[n])[res].tolist()
+        print("number of permutations for n=",n,": ", len(permutations_dict[n]))
+        
+    if include_labels:
+        return permutations_dict, labels_dict
+    else:
+        return permutations_dict

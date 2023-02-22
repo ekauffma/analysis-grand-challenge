@@ -98,7 +98,7 @@ N_FILES_MAX_PER_SAMPLE = 5
 USE_DASK = True
 
 # enable ServiceX
-USE_SERVICEX = False
+USE_SERVICEX = True
 
 # ServiceX: ignore cache with repeated queries
 SERVICEX_IGNORE_CACHE = False
@@ -384,12 +384,12 @@ print(f"\nexample of information in fileset:\n{{\n  'files': [{fileset['ttbar__n
 print(f"  'metadata': {fileset['ttbar__nominal']['metadata']}\n}}")
 
 
-# %% [markdown]
+# %% [markdown] tags=[]
 # ### ServiceX-specific functionality: query setup
 #
 # Define the func_adl query to be used for the purpose of extracting columns and filtering.
 
-# %%
+# %% tags=[]
 def get_query(source: ObjectStream) -> ObjectStream:
     """Query for event / column selection: >=4j >=1b, ==1 lep with pT>25 GeV, return relevant columns
     """
@@ -424,40 +424,15 @@ def get_query(source: ObjectStream) -> ObjectStream:
         )
 
 
-# %% [markdown]
+# %% [markdown] tags=[]
 # ### Caching the queried datasets with `ServiceX`
 #
 # Using the queries created with `func_adl`, we are using `ServiceX` to read the CMS Open Data files to build cached files with only the specific event information as dictated by the query.
 
-# %%
+# %% tags=[]
 if USE_SERVICEX:
     
-    # dummy dataset on which to generate the query
-    dummy_ds = ServiceXSourceUpROOT("cernopendata://dummy", "events", backend_name="uproot")
-
-    # tell low-level infrastructure not to contact ServiceX yet, only to
-    # return the qastle string it would have sent
-    dummy_ds.return_qastle = True
-
-    # create the query
-    query = get_query(dummy_ds).value()
-
-    # now we query the files and create a fileset dictionary containing the
-    # URLs pointing to the queried files
-
-    t0 = time.time()
-    for process in fileset.keys():
-        ds = ServiceXDataset(fileset[process]['files'], 
-                             backend_name="uproot", 
-                             ignore_cache=SERVICEX_IGNORE_CACHE)
-        files = ds.get_data_rootfiles_uri(query, 
-                                          as_signed_url=True,
-                                          title=process)
-
-        
-        fileset[process]["files"] = [f.url for f in files]
-
-    print(f"ServiceX data delivery took {time.time() - t0:.2f} seconds")
+    fileset = utils.getServiceXFileset(fileset, get_query, ignore_cache=SERVICEX_IGNORE_CACHE)
 
 # %% [markdown]
 # ### Execute the data delivery pipeline
@@ -476,7 +451,6 @@ run = processor.Runner(executor=executor, schema=AGCSchema, savemetrics=True, me
 
 if USE_SERVICEX:
     treename = "servicex"
-    
 else:
     treename = "events"
     

@@ -5,6 +5,11 @@ import hist
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import uproot
+import time
+
+from func_adl_servicex import ServiceXSourceUpROOT
+from servicex import ServiceXDataset
+import numpy as np
 
 def get_client(af="coffea_casa"):
     if af == "coffea_casa":
@@ -120,3 +125,42 @@ def save_histograms(all_histograms, fileset, filename):
             # W+jets scale
             f[f"{region}_wjets_scale_var_down"] = all_histograms[120j :: hist.rebin(2), region, "wjets", "scale_var_down"]
             f[f"{region}_wjets_scale_var_up"] = all_histograms[120j :: hist.rebin(2), region, "wjets", "scale_var_up"]
+            
+            
+            
+def getServiceXFileset(fileset, get_query, treename="events", verbose=True, ignore_cache=False):
+    t0 = time.time()
+        
+    # create flat list of files and dictionary of filenames -> processes
+    filelist = []
+    processdict = {}
+    for process in fileset:
+        current_processes = list(set([fileset[process]["files"][i].split('/')[-2] 
+                                      for i in range(len(fileset[process]["files"]))]))
+        for name in current_processes:
+            processdict[name] = process
+        filelist.extend(fileset[process]["files"])
+          
+    # dummy dataset on which to generate the query
+    dummy_ds = ServiceXSourceUpROOT("cernopendata://dummy", treename, backend_name="uproot")
+
+    # tell low-level infrastructure not to contact ServiceX yet, only to
+    # return the qastle string it would have sent
+    dummy_ds.return_qastle = True
+
+    # create the query
+    query = get_query(dummy_ds).value()
+    
+    ds = ServiceXDataset(filelist, backend_name="uproot", ignore_cache=ignore_cache)
+    files = ds.get_data_rootfiles_uri(query, as_signed_url=True)
+    urls = np.array([f.url for f in files])
+    processes = np.array([processdict[f.file.split(":")[-2]] for f in files])
+    
+    # write over file URLs with URLs pointing to the queried files
+    for process in fileset.keys():
+        fileset[process]["files"] = urls[processes==process].tolist()
+        
+    if verbose:
+        print(f"ServiceX data delivery took {time.time() - t0:.2f} seconds")
+        
+    return fileset

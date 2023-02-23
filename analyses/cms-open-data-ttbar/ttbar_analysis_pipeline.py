@@ -431,8 +431,28 @@ def get_query(source: ObjectStream) -> ObjectStream:
 
 # %% tags=[]
 if USE_SERVICEX:
-    
-    fileset = utils.getServiceXFileset(fileset, get_query, ignore_cache=SERVICEX_IGNORE_CACHE)
+    # dummy dataset on which to generate the query
+    dummy_ds = ServiceXSourceUpROOT("cernopendata://dummy", "events", backend_name="uproot")
+
+    # tell low-level infrastructure not to contact ServiceX yet, only to
+    # return the qastle string it would have sent
+    dummy_ds.return_qastle = True
+
+    # create the query
+    query = get_query(dummy_ds).value()
+
+    # now we query the files using a wrapper around ServiceXDataset to transform all processes at once
+    t0 = time.time()
+    ds = utils.ServiceXDatasetGroup(fileset, backend_name="uproot", ignore_cache=SERVICEX_IGNORE_CACHE)
+    files_per_process = ds.get_data_rootfiles_uri(query, as_signed_url=True, title="CMS ttbar")
+
+    print(f"ServiceX data delivery took {time.time() - t0:.2f} seconds")
+
+    # update fileset to point to ServiceX-transformed files
+    for process in fileset.keys():
+        print(process)
+        print([f.file for f in files_per_process[process]])
+        fileset[process]["files"] = [f.url for f in files_per_process[process]]
 
 # %% [markdown]
 # ### Execute the data delivery pipeline
@@ -624,3 +644,5 @@ figs[1]["figure"]
 # Please do not hesitate to get in touch if you would like to join the effort, or are interested in re-implementing (pieces of) the pipeline with different tools!
 #
 # Our mailing list is analysis-grand-challenge@iris-hep.org, sign up via the [Google group](https://groups.google.com/a/iris-hep.org/g/analysis-grand-challenge).
+
+# %%

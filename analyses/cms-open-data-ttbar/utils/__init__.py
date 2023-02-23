@@ -10,6 +10,7 @@ import time
 from func_adl_servicex import ServiceXSourceUpROOT
 from servicex import ServiceXDataset
 import numpy as np
+import awkward as ak
 
 def get_client(af="coffea_casa"):
     if af == "coffea_casa":
@@ -127,40 +128,36 @@ def save_histograms(all_histograms, fileset, filename):
             f[f"{region}_wjets_scale_var_up"] = all_histograms[120j :: hist.rebin(2), region, "wjets", "scale_var_up"]
             
             
+class ServiceXDatasetGroup():
+    def __init__(self, fileset, backend_name="uproot", ignore_cache=False):
+        self.fileset = fileset
+
+        # create flat list of files and keep track of counts
+        filelist = []
+        filelist_counts = np.zeros(len(fileset)).astype(int)
+        for i, process in enumerate(fileset):
+            filelist += fileset[process]["files"]  # add all files together into list for processing
+            filelist_counts[i] = len(fileset[process]["files"])
+
+        self.filelist = filelist
+        self.filelist_counts = filelist_counts
+        
+        self.ds = ServiceXDataset(filelist, backend_name=backend_name, ignore_cache=ignore_cache)
+
+    def get_data_rootfiles_uri(self, query, as_signed_url=True, title="Untitled"):
+        
+        all_files = np.array(self.ds.get_data_rootfiles_uri(query, as_signed_url=as_signed_url, title=title))
+        
+        # replace all "/" with ":" for matching purposes
+        filelist = np.array([f.replace("/",":") for f in self.filelist])
+        parent_file_urls = np.array([f.file for f in all_files])
+        
+        # order is not retained after transform, so we can match files to their parent files using the filename
+        parent_key = [np.where(parent_file_urls==filelist[i])[0][0] for i in range(len(filelist))]
+        parent_key = ak.unflatten(parent_key, self.filelist_counts)
+        
+        files_per_process = {}
+        for i, process in enumerate(self.fileset):
+            files_per_process.update({process: all_files[parent_key[i]]})
             
-def getServiceXFileset(fileset, get_query, treename="events", verbose=True, ignore_cache=False):
-    t0 = time.time()
-        
-    # create flat list of files and dictionary of filenames -> processes
-    filelist = []
-    processdict = {}
-    for process in fileset:
-        current_processes = list(set([fileset[process]["files"][i].split('/')[-2] 
-                                      for i in range(len(fileset[process]["files"]))]))
-        for name in current_processes:
-            processdict[name] = process
-        filelist.extend(fileset[process]["files"])
-          
-    # dummy dataset on which to generate the query
-    dummy_ds = ServiceXSourceUpROOT("cernopendata://dummy", treename, backend_name="uproot")
-
-    # tell low-level infrastructure not to contact ServiceX yet, only to
-    # return the qastle string it would have sent
-    dummy_ds.return_qastle = True
-
-    # create the query
-    query = get_query(dummy_ds).value()
-    
-    ds = ServiceXDataset(filelist, backend_name="uproot", ignore_cache=ignore_cache)
-    files = ds.get_data_rootfiles_uri(query, as_signed_url=True)
-    urls = np.array([f.url for f in files])
-    processes = np.array([processdict[f.file.split(":")[-2]] for f in files])
-    
-    # write over file URLs with URLs pointing to the queried files
-    for process in fileset.keys():
-        fileset[process]["files"] = urls[processes==process].tolist()
-        
-    if verbose:
-        print(f"ServiceX data delivery took {time.time() - t0:.2f} seconds")
-        
-    return fileset
+        return files_per_process

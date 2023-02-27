@@ -473,13 +473,13 @@ print(sum(labels==1))
 # # Histograms of Training Variables
 # To vizualize the separation power of the different variables, histograms are created for each of the three labels. Only `all_correct` and `none_correct` are used for training purposes.
 
-# %% jupyter={"source_hidden": true} tags=[]
+# %% tags=[]
 # separate by label for plotting
 all_correct = features[labels==1,:]
 some_correct = features[labels==-1,:]
 none_correct = features[labels==0,:]
 
-# %% jupyter={"source_hidden": true, "outputs_hidden": true} tags=[]
+# %% tags=[]
 #### delta R histogram ####
 
 # binning
@@ -528,7 +528,7 @@ ax.legend(legend_list)
 ax.set_title("$\Delta R$ between W jet and top2 jet")
 fig.show()
 
-# %% jupyter={"source_hidden": true, "outputs_hidden": true} tags=[]
+# %% tags=[]
 #### delta phi histogram ####
 
 # binning
@@ -577,7 +577,7 @@ ax.legend(legend_list)
 ax.set_title("$\Delta \phi$ between W jet and top2 jet")
 fig.show()
 
-# %% jupyter={"source_hidden": true, "outputs_hidden": true} tags=[]
+# %% tags=[]
 #### mass histogram ####
 
 # binning
@@ -628,7 +628,7 @@ ax.set_title("Combined mass of W jets and top2 jet")
 ax.set_xlim([0,600])
 fig.show()
 
-# %% jupyter={"source_hidden": true, "outputs_hidden": true} tags=[]
+# %% jupyter={"outputs_hidden": true} tags=[]
 #### pT histogram ####
 
 # binning
@@ -681,7 +681,7 @@ ax.set_title("top1 Jet $p_T$")
 ax.set_xlim([25,200])
 fig.show()
 
-# %% jupyter={"source_hidden": true, "outputs_hidden": true} tags=[]
+# %% jupyter={"outputs_hidden": true} tags=[]
 #### mass histogram ####
 
 # binning

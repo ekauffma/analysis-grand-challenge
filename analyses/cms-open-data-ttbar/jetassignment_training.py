@@ -43,9 +43,12 @@ import hist
 import json
 import matplotlib.pyplot as plt
 import uproot
+import time
+import os
 
 import utils
 
+# ML-related imports
 from dask.distributed import Client
 from sklearn.preprocessing import PowerTransformer
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
@@ -60,10 +63,10 @@ import onnx
 ### GLOBAL CONFIGURATION
 
 # input files per process, set to e.g. 10 (smaller number = faster, want to use larger number for training)
-N_FILES_MAX_PER_SAMPLE = 5
+N_FILES_MAX_PER_SAMPLE = -1
 
-# set to "dask" for DaskExecutor, "futures" for FuturesExecutor
-EXEC = "futures"
+# set to True for DaskExecutor
+USE_DASK_PROCESSING = True
 
 # number of cores if using FuturesExecutor
 NUM_CORES = 4
@@ -80,7 +83,7 @@ AF = "coffea_casa"
 USE_DASK_ML = True
 
 # enable MLFlow logging (to store metrics and models of hyperparameter optimization trials)
-USE_MLFLOW = False
+USE_MLFLOW = True
 
 # enable MLFlow model logging/registering
 MODEL_LOGGING = False
@@ -89,7 +92,7 @@ MODEL_LOGGING = False
 N_FOLD = 5
 
 # number of trials (per model) for hyperparameter optimization. Total number of trials will be 2*N_TRIALS
-N_TRIALS = 2
+N_TRIALS = 4
 
 # name to use for saving model to triton server
 MODEL_NAME = "sigbkg_bdt"
@@ -97,23 +100,19 @@ MODEL_NAME = "sigbkg_bdt"
 # if True, write over previous versions of model in triton directory
 WRITE_OVER = True
 
-# %%
-permutations_dict, labels_dict = utils.get_permutations_dict(4, include_labels=True)
+# number of events to train with for each model (N events = 12*N dataset)
+N_EVENTS_TRAIN = 1000
 
 # %%
-# these matrices tell you the overlap between the predicted label (rows) and truth label (columns)
-# the "score" in each matrix entry is the number of jets which are assigned correctly
-evaluation_matrices = {} # overall event score
-
-for n in range(4,4+1):
-    print("n = ", n)
-    evaluation_matrix = np.zeros((len(permutations_dict[n]),len(permutations_dict[n])))
-    
-    for i in range(len(permutations_dict[n])):
-        for j in range(len(permutations_dict[n])):
-            evaluation_matrix[i,j]=sum(np.equal(labels_dict[n][i], labels_dict[n][j]))
-    
-    evaluation_matrices[n] = evaluation_matrix/4
+# get dictionaries for permutation indices, associated labels, and evaluation matrices
+# permutation indices correspond to the different possible combinations of jets in an event for correspondence 
+# with the W boson, the top quark on the side of hadronic decay, and the top quark on the side of leptonic decay
+# evaluation matrix is used to calculate the fraction of matches correct within an event
+permutations_dict, labels_dict, evaluation_matrices = utils.get_permutations_dict(4, 
+                                                                                  include_labels=True, 
+                                                                                  include_eval_mat=True)
+evaluation_matrix = evaluation_matrices[4]
+print(evaluation_matrix)
 
 
 # %%
@@ -413,29 +412,29 @@ for key in fileset_keys:
         fileset.pop(key)
 
 # %% tags=[]
-fileset
+fileset['ttbar__nominal']['metadata']
 
 # %% [markdown]
 # ### Execute the data delivery pipeline
 
 # %% tags=[]
-# NanoAODSchema.warn_missing_crossrefs = False
+NanoAODSchema.warn_missing_crossrefs = False
 
-# if EXEC == "futures":
-#     executor = processor.FuturesExecutor(workers=NUM_CORES)
-# elif EXEC == "dask":
-#     executor = processor.DaskExecutor(client=utils.get_client(AF))
+if USE_DASK_PROCESSING:
+    executor = processor.DaskExecutor(client=utils.get_client(AF))
+else:
+    executor = processor.FuturesExecutor(workers=NUM_CORES)
     
-# run = processor.Runner(executor=executor, schema=NanoAODSchema, savemetrics=True, metadata_cache={}, 
-#                        chunksize=CHUNKSIZE)
+run = processor.Runner(executor=executor, schema=NanoAODSchema, savemetrics=True, metadata_cache={}, 
+                       chunksize=CHUNKSIZE)
 
-# # preprocess
-# filemeta = run.preprocess(fileset, treename="Events")
+# preprocess
+filemeta = run.preprocess(fileset, treename="Events")
 
-# # process
-# output, metrics = run(fileset, 
-#                       "Events", 
-#                       processor_instance = JetClassifier(permutations_dict, labels_dict))
+# process
+output, metrics = run(fileset, 
+                      "Events", 
+                      processor_instance = JetClassifier(permutations_dict, labels_dict))
 
 # %%
 # import pickle
@@ -447,9 +446,10 @@ output = pickle.load(open("output_temp.p", "rb"))
 
 # %%
 # grab features and labels and convert to np array
-features = np.array(output['features']['ttbar__nominal'])
-labels = np.array(output['labels']['ttbar__nominal'])
-even = np.array(output['even']['ttbar__nominal'])
+features = output['features'].value
+labels = output['labels'].value
+even = output['even'].value
+observable = output['observable'].value
 
 labels = labels.reshape((len(labels),))
 even = np.repeat(even, 12)
@@ -604,7 +604,7 @@ h.fill(combinedmass = none_correct[:,9], category="W_W", truthlabel="No Matches 
 h.fill(combinedmass = all_correct[:,10], category="top2_W_W", truthlabel="All Matches Correct")
 h.fill(combinedmass = some_correct[:,10], category="top2_W_W", truthlabel="Some Matches Correct")
 h.fill(combinedmass = none_correct[:,10], category="top2_W_W", truthlabel="No Matches Correct")
-h.fill(combinedmass = output["observable"]["ttbar__nominal"], category="top2_W_W", truthlabel="Jet Triplet with Largest pT")
+h.fill(combinedmass = observable, category="top2_W_W", truthlabel="Jet Triplet with Largest pT")
 
 # make plots
 fig,ax = plt.subplots(1,1,figsize=(8,4))
@@ -628,7 +628,7 @@ ax.set_title("Combined mass of W jets and top2 jet")
 ax.set_xlim([0,600])
 fig.show()
 
-# %% jupyter={"outputs_hidden": true} tags=[]
+# %% tags=[]
 #### pT histogram ####
 
 # binning
@@ -681,7 +681,7 @@ ax.set_title("top1 Jet $p_T$")
 ax.set_xlim([25,200])
 fig.show()
 
-# %% jupyter={"outputs_hidden": true} tags=[]
+# %% tags=[]
 #### mass histogram ####
 
 # binning
@@ -738,10 +738,10 @@ fig.show()
 
 # %%
 # grab features and labels and convert to np array
-features = np.array(output['features']['ttbar__nominal'])
-labels = np.array(output['labels']['ttbar__nominal'])
+features = output['features'].value
+labels = output['labels'].value
 labels[labels==-1]=0 # partially correct = wrong
-even = np.array(output['even']['ttbar__nominal'])
+even = output['even'].value
 
 features = features.reshape((int(features.shape[0]/12),12,19))
 labels = labels.reshape((int(labels.shape[0]/12),12))
@@ -780,8 +780,8 @@ features_odd = power.fit_transform(features_odd)
 # define environment variables locally
 # %env MLFLOW_TRACKING_URI=https://mlflow.software-dev.ncsa.cloud
 # %env MLFLOW_S3_ENDPOINT_URL=https://mlflow-minio-api.software-dev.ncsa.cloud
-# %env AWS_ACCESS_KEY_ID=bengal1
-# %env AWS_SECRET_ACCESS_KEY=leftfoot1
+# %env AWS_ACCESS_KEY_ID=
+# %env AWS_SECRET_ACCESS_KEY=
 
 # %%
 # set up trials
@@ -790,7 +790,7 @@ if USE_MLFLOW:
     mlflow.set_experiment("optimize-reconstruction-bdt-00") # this will create the experiment if it does not yet exist
 
     # grab experiment
-    current_experiment=dict(mlflow.get_experiment_by_name("agc-demo"))
+    current_experiment=dict(mlflow.get_experiment_by_name("optimize-reconstruction-bdt-00"))
     experiment_id=current_experiment['experiment_id']
     print("experiment_id = ", experiment_id)
 
@@ -807,7 +807,8 @@ sampler = ParameterSampler({'max_depth': np.arange(2,30,2,dtype=int),
                             'min_child_weight': np.logspace(-1, 2, 20), 
                             'reg_lambda': [0, 0.25, 0.5, 0.75, 1], 
                             'reg_alpha': [0, 0.25, 0.5, 0.75, 1],
-                            'gamma': np.logspace(-4, 1, 20),}, 
+                            'gamma': np.logspace(-4, 1, 20),
+                            'tree_method': ["hist"],}, 
                             n_iter = N_TRIALS, 
                             random_state=34) 
 
@@ -830,20 +831,21 @@ print("Example of Trial Parameters: ")
 samples_even[0]
 
 # %%
-# set mlflowclient
-mlflowclient = MlflowClient()
-
-# %%
-evaluation_matrix = evaluation_matrices[4]
+if USE_MLFLOW:
+    # set mlflowclient
+    mlflowclient = MlflowClient()
+else: 
+    mlflowclient = None
 
 
 # %%
 def modified_cross_validation(model, 
-                              features, labels, which_combination, 
+                              features, labels, 
                               evaluation_matrix, n_folds=2):
         
     features = features.reshape((int(features.shape[0]/12),12,19))
     labels = labels.reshape((int(labels.shape[0]/12),12))
+    which_combination = np.argmax(labels, axis=-1)
         
     shuffle_ind = np.array(range(features.shape[0])).astype(int)
     np.random.shuffle(shuffle_ind)
@@ -937,67 +939,161 @@ def modified_cross_validation(model,
 def fit_model(params, 
               features, 
               labels, 
-              which_combination,
               evaluation_matrix,
               n_folds,
               mlflowclient=None,
               use_mlflow=False,
               log_models=False): 
                     
+    if use_mlflow:
+        
+        run_id = params["run_id"]
+        
+        for param_name, value in params.items():
+            mlflowclient.log_param(run_id, param_name, value)
+        
+    # remove parameters that are not used for XGBClassifier
+    params_copy = params.copy()
+    params_copy.pop("trial_num")
+    params_copy.pop("parity")
+    if use_mlflow: params_copy.pop("run_id")
+    
     # initialize model with current trial paramters
     model = XGBClassifier(random_state=5, 
                           nthread=-1,
-                          **params) 
+                          **params_copy) 
 
 
     # perform n-fold cross-validation
-    result = modified_cross_validation(model, features, labels, which_combination,
+    result = modified_cross_validation(model, features, labels,
                                       evaluation_matrix, n_folds=n_folds)
+    
+    if use_mlflow:
+        for metric, value in result.items():
+            if not metric=="model":
+                mlflowclient.log_metric(run_id, metric, np.average(value))
+
+        # manually end run
+        mlflowclient.set_terminated(run_id)
         
     return {"score": np.average(result["test_jet_score"]),
             "full_result": result}
 
-# %%
-evaluation_matrix = evaluation_matrices[4]
 
 # %%
-client = utils.get_client()
-
-# %%
-futures = client.map(fit_model,
-                     samples_even, 
-                     features=features_even, 
-                     labels=labels_even,
-                     which_combination=which_combination_even,
-                     evaluation_matrix=evaluation_matrix,
-                     n_folds=2,
-                     mlflowclient=None,
-                     use_mlflow=False,
-                     log_models=False) 
+# function to provide necessary environment variables to workers
+def initialize_mlflow(): 
     
-res = client.gather(futures) 
+    os.environ['MLFLOW_TRACKING_URI'] = "https://mlflow.software-dev.ncsa.cloud"
+    os.environ['MLFLOW_S3_ENDPOINT_URL'] = "https://mlflow-minio-api.software-dev.ncsa.cloud"
+    os.environ['AWS_ACCESS_KEY_ID'] = ""
+    os.environ['AWS_SECRET_ACCESS_KEY'] = ""
+    
+    mlflow.set_tracking_uri('https://mlflow.software-dev.ncsa.cloud') 
+    mlflow.set_experiment("agc-training-demo")
+
 
 # %%
-res
+if USE_DASK_ML:
+    start_time = time.time() 
+    
+    client = utils.get_client()
+    client.run(initialize_mlflow)
+    
+    futures = client.map(fit_model,
+                         samples_even, 
+                         features=features_even[:N_EVENTS_TRAIN*12], 
+                         labels=labels_even[:N_EVENTS_TRAIN*12],
+                         evaluation_matrix=evaluation_matrix,
+                         n_folds=N_FOLD,
+                         mlflowclient=mlflowclient,
+                         use_mlflow=USE_MLFLOW,
+                         log_models=MODEL_LOGGING) 
 
-# %%
+    res = client.gather(futures)
+    time_elapsed = time.time() - start_time
+    
+else:
+    start_time = time.time() 
+    res = np.zeros(len(samples_even))
+    for i in range(len(samples_even)):
+        res[i] = fit_model(samples_even[i], 
+                           features=features_even[:N_EVENTS_TRAIN*12],
+                           labels=labels_even[:N_EVENTS_TRAIN*12], 
+                           evaluation_matrix=evaluation_matrix,
+                           n_folds=N_FOLD,
+                           mlflowclient=mlflowclient,
+                           use_mlflow=USE_MLFLOW,
+                           model_logging=MODEL_LOGGING)
+    time_elapsed = time.time() - start_time
+
+print("Hyperparameter optimization took time = ", time_elapsed)
+print()
+
 scores = [res[i]["score"] for i in range(len(res))]
-best_parameters = samples_even[np.argmax(scores)]
+best_parameters_even = samples_even[np.argmax(scores)]
+print("best_parameters_even = ")
+best_parameters_even
+
+# %%
+best_model_even = res[np.argmax(scores)]["full_result"]["model"]
+best_model_even.save_model("models/model_xgb_230301_even.model")
+
+# %%
+if USE_DASK_ML:
+    start_time = time.time() 
+    
+    client = utils.get_client()
+    client.run(initialize_mlflow)
+    
+    futures = client.map(fit_model,
+                         samples_odd, 
+                         features=features_odd[:N_EVENTS_TRAIN*12], 
+                         labels=labels_odd[:N_EVENTS_TRAIN*12],
+                         evaluation_matrix=evaluation_matrix,
+                         n_folds=N_FOLD,
+                         mlflowclient=mlflowclient,
+                         use_mlflow=USE_MLFLOW,
+                         log_models=MODEL_LOGGING) 
+
+    res = client.gather(futures)
+    time_elapsed = time.time() - start_time
+    
+else:
+    start_time = time.time() 
+    res = np.zeros(len(samples_odd))
+    for i in range(len(samples_odd)):
+        res[i] = fit_model(samples_odd[i], 
+                           features=features_odd[:N_EVENTS_TRAIN*12],
+                           labels=labels_odd[:N_EVENTS_TRAIN*12], 
+                           evaluation_matrix=evaluation_matrix,
+                           n_folds=N_FOLD,
+                           mlflowclient=mlflowclient,
+                           use_mlflow=USE_MLFLOW,
+                           model_logging=MODEL_LOGGING)
+    time_elapsed = time.time() - start_time
+
+print("Hyperparameter optimization took time = ", time_elapsed)
+print()
+
+scores = [res[i]["score"] for i in range(len(res))]
+best_parameters_odd = samples_odd[np.argmax(scores)]
+print("best_parameters_odd = ")
+best_parameters_odd
+
+# %%
+best_model_odd = res[np.argmax(scores)]["full_result"]["model"]
+best_model_odd.save_model("models/model_xgb_230301_odd.model")
 
 # %% [markdown]
-# # Training/Evaluation with Optimized Model
-
-# %%
-# define and fit model to data
-model = XGBClassifier(**best_parameters)
-model = model.fit(features_even, labels_even)
+# # Evaluation with Optimized Model
 
 # %%
 # make predictions
-train_predicted = model.predict(features_even)
-train_predicted_prob = model.predict_proba(features_even)[:, 1]
-val_predicted = model.predict(features_odd)
-val_predicted_prob = model.predict_proba(features_odd)[:, 1]
+train_predicted = best_model_even.predict(features_even)
+train_predicted_prob = best_model_even.predict_proba(features_even)[:, 1]
+val_predicted = best_model_even.predict(features_odd)
+val_predicted_prob = best_model_even.predict_proba(features_odd)[:, 1]
 
 # %%
 train_accuracy = accuracy_score(labels_even, train_predicted).round(3)
@@ -1052,5 +1148,60 @@ score = sum(scores)/len(scores)
 print("Training Jet Score = ", score)
 
 # %%
-# save model to json. this file can be used with the FIL backend in nvidia-triton!
-model.save_model("models/model_xgb_230227.json")
+# make predictions
+train_predicted = best_model_odd.predict(features_odd)
+train_predicted_prob = best_model_odd.predict_proba(features_odd)[:, 1]
+val_predicted = best_model_odd.predict(features_even)
+val_predicted_prob = best_model_odd.predict_proba(features_even)[:, 1]
+
+# %%
+train_accuracy = accuracy_score(labels_odd, train_predicted).round(3)
+train_precision = precision_score(labels_odd, train_predicted).round(3)
+train_recall = recall_score(labels_odd, train_predicted).round(3)
+train_f1 = f1_score(labels_odd, train_predicted).round(3)
+train_aucroc = roc_auc_score(labels_odd, train_predicted_prob).round(3)
+print("Training Accuracy = ", train_accuracy)
+print("Training Precision = ", train_precision)
+print("Training Recall = ", train_recall)
+print("Training f1 = ", train_f1)
+print("Training AUC = ", train_aucroc)
+print()
+
+val_accuracy = accuracy_score(labels_even, val_predicted).round(3)
+val_precision = precision_score(labels_even, val_predicted).round(3)
+val_recall = recall_score(labels_even, val_predicted).round(3)
+val_f1 = f1_score(labels_even, val_predicted).round(3)
+val_aucroc = roc_auc_score(labels_even, val_predicted_prob).round(3)
+print("Validation Accuracy = ", val_accuracy)
+print("Validation Precision = ", val_precision)
+print("Validation Recall = ", val_recall)
+print("Validation f1 = ", val_f1)
+print("Validation AUC = ", val_aucroc)
+
+# %%
+val_predicted_prob = val_predicted_prob.reshape((int(len(val_predicted_prob)/12),12))
+val_predicted_combination = np.argmax(val_predicted_prob,axis=1)
+    
+scores = np.zeros(len(which_combination_even))
+zipped = list(zip(which_combination_even.tolist(), val_predicted_combination.tolist()))
+for i in range(len(which_combination_even)):
+    scores[i] = evaluation_matrix[zipped[i]]
+        
+score = sum(scores)/len(scores)
+print("Validation Jet Score = ", score)
+
+print("How many events are 100% correct: ", sum(scores==1)/len(scores), ", Random = ",sum(evaluation_matrix[0,:]==1)/12)
+print("How many events are 50% correct: ", sum(scores==0.5)/len(scores), ", Random = ",sum(evaluation_matrix[0,:]==0.5)/12)
+print("How many events are 25% correct: ", sum(scores==0.25)/len(scores), ", Random = ",sum(evaluation_matrix[0,:]==0.25)/12)
+print("How many events are 0% correct: ", sum(scores==0)/len(scores), ", Random = ",sum(evaluation_matrix[0,:]==0)/12)
+
+train_predicted_prob = train_predicted_prob.reshape((int(len(train_predicted_prob)/12),12))
+train_predicted_combination = np.argmax(train_predicted_prob,axis=1)
+    
+scores = np.zeros(len(which_combination_odd))
+zipped = list(zip(which_combination_odd.tolist(), train_predicted_combination.tolist()))
+for i in range(len(which_combination_odd)):
+    scores[i] = evaluation_matrix[zipped[i]]
+        
+score = sum(scores)/len(scores)
+print("Training Jet Score = ", score)

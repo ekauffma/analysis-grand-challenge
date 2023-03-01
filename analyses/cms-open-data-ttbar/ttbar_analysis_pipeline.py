@@ -60,6 +60,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import uproot
 
+# ML-related imports
+from sklearn.preprocessing import PowerTransformer
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+from sklearn.model_selection import ParameterSampler, train_test_split, KFold, cross_validate
+import mlflow
+from mlflow.models.signature import infer_signature
+from mlflow.tracking import MlflowClient
+from xgboost import XGBClassifier
+
 import utils  # contains code for bookkeeping and cosmetics, as well as some boilerplate
 
 logging.getLogger("cabinetry").setLevel(logging.INFO)
@@ -127,6 +136,99 @@ DISABLE_PROCESSING = False
 # acceptable values are 2.7, 4, 15, 25, 50 (corresponding to % of file read), 2.7% corresponds to the standard branches used in the notebook
 IO_FILE_PERCENT = 2.7
 
+# maximum number of jets to consider for reconstruction BDT
+MAX_N_JETS = 6
+
+# %% [markdown]
+# ### Machine Learning Task
+#
+# During the processing step, machine learning is used to calculate one of the variables used for this analysis. The models used are trained separately in the `jetassignment_training.ipynb` notebook. Jets in the events are assigned to labels corresponding with their parent partons using a boosted decision tree (BDT). More information about the model and training can be found within that notebook. To obtain the features used as inputs for the BDT, we use the methods defined below"
+
+# %%
+permutations_dict = utils.get_permutations_dict(MAX_N_JETS)
+
+
+# %%
+def get_features(jets, electrons, muons, permutations_dict):
+    
+    '''
+    Calculate features for each of the combinations per event and calculates combination-level labels
+    
+    Args:
+        jets: selected jets after training filter
+        electrons: selected electrons after training filter
+        muons: selected muons after training filter
+        permutations_dict: dictionary containing the permutation indices for each number of jets
+    
+    Returns:
+        features (flattened to remove event level)
+    '''
+    
+    # calculate number of jets in each event
+    njet = ak.num(jets).to_numpy()
+    # don't consider every jet for events with high jet multiplicity
+    njet[njet>max(permutations_dict.keys())] = max(permutations_dict.keys())
+    # create awkward array of permutation indices
+    perms = ak.Array([permutations_dict[n] for n in njet])
+    perm_counts = ak.num(perms)
+    
+    #### calculate features ####
+    features = np.zeros((sum(perm_counts),19))
+    
+    # grab lepton info
+    leptons = ak.flatten(ak.concatenate((electrons, muons),axis=1),axis=-1)
+
+    # delta R between top1 and lepton
+    features[:,0] = ak.flatten(np.sqrt((leptons.eta - jets[perms[...,3]].eta)**2 + 
+                                       (leptons.phi - jets[perms[...,3]].phi)**2)).to_numpy()
+
+    # delta R between the two W
+    features[:,1] = ak.flatten(np.sqrt((jets[perms[...,0]].eta - jets[perms[...,1]].eta)**2 + 
+                                       (jets[perms[...,0]].phi - jets[perms[...,1]].phi)**2)).to_numpy()
+
+    # delta R between W and top2
+    features[:,2] = ak.flatten(np.sqrt((jets[perms[...,0]].eta - jets[perms[...,2]].eta)**2 + 
+                                       (jets[perms[...,0]].phi - jets[perms[...,2]].phi)**2)).to_numpy()
+    features[:,3] = ak.flatten(np.sqrt((jets[perms[...,1]].eta - jets[perms[...,2]].eta)**2 + 
+                                       (jets[perms[...,1]].phi - jets[perms[...,2]].phi)**2)).to_numpy()
+
+    # delta phi between top1 and lepton
+    features[:,4] = ak.flatten(np.abs(leptons.phi - jets[perms[...,3]].phi)).to_numpy()
+
+    # delta phi between the two W
+    features[:,5] = ak.flatten(np.abs(jets[perms[...,0]].phi - jets[perms[...,1]].phi)).to_numpy()
+
+    # delta phi between W and top2
+    features[:,6] = ak.flatten(np.abs(jets[perms[...,0]].phi - jets[perms[...,2]].phi)).to_numpy()
+    features[:,7] = ak.flatten(np.abs(jets[perms[...,1]].phi - jets[perms[...,2]].phi)).to_numpy()
+
+
+    # combined mass of top1 and lepton
+    features[:,8] = ak.flatten((leptons + jets[perms[...,3]]).mass).to_numpy()
+
+    # combined mass of W
+    features[:,9] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]]).mass).to_numpy()
+
+    # combined mass of W and top2
+    features[:,10] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
+                                 jets[perms[...,2]]).mass).to_numpy()
+
+
+    # pt of every jet
+    features[:,11] = ak.flatten(jets[perms[...,0]].pt).to_numpy()
+    features[:,12] = ak.flatten(jets[perms[...,1]].pt).to_numpy()
+    features[:,13] = ak.flatten(jets[perms[...,2]].pt).to_numpy()
+    features[:,14] = ak.flatten(jets[perms[...,3]].pt).to_numpy()
+
+
+    # mass of every jet
+    features[:,15] = ak.flatten(jets[perms[...,0]].mass).to_numpy()
+    features[:,16] = ak.flatten(jets[perms[...,1]].mass).to_numpy()
+    features[:,17] = ak.flatten(jets[perms[...,2]].mass).to_numpy()
+    features[:,18] = ak.flatten(jets[perms[...,3]].mass).to_numpy()
+    
+    return features
+
 
 # %% [markdown]
 # ### Defining our `coffea` Processor
@@ -166,6 +268,7 @@ class TtbarAnalysis(processor.ProcessorABC):
         label = "observable [GeV]"
         self.hist = (
             hist.Hist.new.Reg(num_bins, bin_low, bin_high, name=name, label=label)
+            .Reg(num_bins, bin_low, bin_high, name="ml_observable", label="ML observable [GeV]")
             .StrCat(["4j1b", "4j2b"], name="region", label="Region")
             .StrCat([], name="process", label="Process", growth=True)
             .StrCat([], name="variation", label="Systematic variation", growth=True)

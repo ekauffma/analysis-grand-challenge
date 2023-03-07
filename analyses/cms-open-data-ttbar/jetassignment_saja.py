@@ -114,7 +114,7 @@ def filterEvents(jets, electrons, muons, genpart):
     labels = labels[training_event_filter]
     
     return selected_jets_region, selected_electrons_region, selected_muons_region, labels
-  
+
 
 # %%
 def get_data_mask(data, length):

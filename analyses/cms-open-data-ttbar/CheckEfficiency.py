@@ -37,7 +37,7 @@ import xgboost as xgb
 import utils
 
 # %%
-DICT_MAX = 6 # maximum permutation number to include in dictionaries
+DICT_MAX = 7 # maximum permutation number to include in dictionaries
 
 # calculate the dictionary of permutations for each number of jets
 permutations_dict = {}
@@ -146,7 +146,7 @@ def get_features(jets, electrons, muons, permutations_dict):
     
     
     #### calculate features ####
-    features = np.zeros((sum(perm_counts),19))
+    features = np.zeros((sum(perm_counts),20))
     
     # grab lepton info
     leptons = ak.flatten(ak.concatenate((electrons, muons),axis=1),axis=-1)
@@ -185,20 +185,24 @@ def get_features(jets, electrons, muons, permutations_dict):
     # combined mass of W and top2
     features[:,10] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
                                  jets[perms[...,2]]).mass).to_numpy()
+    
+    # combined mass of W and top2
+    features[:,11] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
+                                 jets[perms[...,2]]).pt).to_numpy()
 
 
     # pt of every jet
-    features[:,11] = ak.flatten(jets[perms[...,0]].pt).to_numpy()
-    features[:,12] = ak.flatten(jets[perms[...,1]].pt).to_numpy()
-    features[:,13] = ak.flatten(jets[perms[...,2]].pt).to_numpy()
-    features[:,14] = ak.flatten(jets[perms[...,3]].pt).to_numpy()
+    features[:,12] = ak.flatten(jets[perms[...,0]].pt).to_numpy()
+    features[:,13] = ak.flatten(jets[perms[...,1]].pt).to_numpy()
+    features[:,14] = ak.flatten(jets[perms[...,2]].pt).to_numpy()
+    features[:,15] = ak.flatten(jets[perms[...,3]].pt).to_numpy()
 
 
     # mass of every jet
-    features[:,15] = ak.flatten(jets[perms[...,0]].mass).to_numpy()
-    features[:,16] = ak.flatten(jets[perms[...,1]].mass).to_numpy()
-    features[:,17] = ak.flatten(jets[perms[...,2]].mass).to_numpy()
-    features[:,18] = ak.flatten(jets[perms[...,3]].mass).to_numpy()
+    features[:,16] = ak.flatten(jets[perms[...,0]].mass).to_numpy()
+    features[:,17] = ak.flatten(jets[perms[...,1]].mass).to_numpy()
+    features[:,18] = ak.flatten(jets[perms[...,2]].mass).to_numpy()
+    features[:,19] = ak.flatten(jets[perms[...,3]].mass).to_numpy()
 
     return features, perm_counts
 
@@ -310,7 +314,7 @@ def filterEvents(jets, electrons, muons, genpart, nmin, nmax, reconstructable=Tr
 # %%
 # load model
 model = xgb.XGBClassifier()
-model.load_model("models/model_xgb_230227.json")
+model.load_model("models/testmodel_10.model")
 
 # %%
 # load data 
@@ -318,6 +322,9 @@ num_events = 100_000
 events = NanoEventsFactory.from_root("https://xrootd-local.unl.edu:1094//store/user/AGC/nanoAOD/TT_TuneCUETP8M1_13TeV-powheg-pythia8/cmsopendata2015_ttbar_19980_PU25nsData2015v1_76X_mcRun2_asymptotic_v12_ext3-v1_00000_0004.root", 
                                      treepath="Events", entry_stop=num_events).events()
 
+
+# %%
+model.classes_
 
 # %% [markdown]
 # # Evaluation 1
@@ -370,7 +377,7 @@ features = power.fit_transform(features)
 print("preprocessed features")
 
 # get predictions
-predictions = model.predict_proba(features)[:,1]
+predictions = model.predict_proba(features)[:,0]
 print("obtained predictions")
 
 BDT_results = ak.unflatten(predictions, perm_counts)

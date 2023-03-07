@@ -62,12 +62,12 @@ import uproot
 
 # ML-related imports
 from sklearn.preprocessing import PowerTransformer
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
-from sklearn.model_selection import ParameterSampler, train_test_split, KFold, cross_validate
 import mlflow
 from mlflow.models.signature import infer_signature
 from mlflow.tracking import MlflowClient
 from xgboost import XGBClassifier
+from xgboost import plot_tree
+import tritonclient.grpc as grpcclient
 
 import utils  # contains code for bookkeeping and cosmetics, as well as some boilerplate
 
@@ -101,10 +101,10 @@ logging.getLogger("cabinetry").setLevel(logging.INFO)
 ### GLOBAL CONFIGURATION
 
 # input files per process, set to e.g. 10 (smaller number = faster)
-N_FILES_MAX_PER_SAMPLE = 5
+N_FILES_MAX_PER_SAMPLE = 1
 
-# enable Dask
-USE_DASK = True
+# enable Dask (currently will not work with Triton inference)
+USE_DASK = False
 
 # enable ServiceX
 USE_SERVICEX = False
@@ -119,7 +119,7 @@ AF = "coffea_casa"
 ### BENCHMARKING-SPECIFIC SETTINGS
 
 # chunk size to use
-CHUNKSIZE = 500_000
+CHUNKSIZE = 10_000
 
 # metadata to propagate through to metrics
 AF_NAME = "coffea_casa"  # "ssl-dev" allows for the switch to local data on /data
@@ -127,7 +127,7 @@ SYSTEMATICS = "all"  # currently has no effect
 CORES_PER_WORKER = 2  # does not do anything, only used for metric gathering (set to 2 for distributed coffea-casa)
 
 # scaling for local setups with FuturesExecutor
-NUM_CORES = 4
+NUM_CORES = 8
 
 # only I/O, all other processing disabled
 DISABLE_PROCESSING = False
@@ -139,10 +139,19 @@ IO_FILE_PERCENT = 2.7
 # maximum number of jets to consider for reconstruction BDT
 MAX_N_JETS = 6
 
+# name of model loaded in triton server
+MODEL_NAME = "reconstruction_bdt_xgb"
+
+# version of triton model to use
+MODEL_VERSION = "1"
+
+# URL of triton server 
+TRITON_URL = "agc-triton-inference-server:8001"
+
 # %% [markdown]
 # ### Machine Learning Task
 #
-# During the processing step, machine learning is used to calculate one of the variables used for this analysis. The models used are trained separately in the `jetassignment_training.ipynb` notebook. Jets in the events are assigned to labels corresponding with their parent partons using a boosted decision tree (BDT). More information about the model and training can be found within that notebook. To obtain the features used as inputs for the BDT, we use the methods defined below"
+# During the processing step, machine learning is used to calculate one of the variables used for this analysis. The models used are trained separately in the `jetassignment_training.ipynb` notebook. Jets in the events are assigned to labels corresponding with their parent partons using a boosted decision tree (BDT). More information about the model and training can be found within that notebook. To obtain the features used as inputs for the BDT, we use the methods defined below:
 
 # %%
 permutations_dict = utils.get_permutations_dict(MAX_N_JETS)
@@ -214,7 +223,7 @@ def get_features(jets, electrons, muons, permutations_dict):
                                  jets[perms[...,2]]).mass).to_numpy()
 
 
-    # pt of every jet
+#     # pt of every jet
     features[:,11] = ak.flatten(jets[perms[...,0]].pt).to_numpy()
     features[:,12] = ak.flatten(jets[perms[...,1]].pt).to_numpy()
     features[:,13] = ak.flatten(jets[perms[...,2]].pt).to_numpy()
@@ -227,7 +236,7 @@ def get_features(jets, electrons, muons, permutations_dict):
     features[:,17] = ak.flatten(jets[perms[...,2]].mass).to_numpy()
     features[:,18] = ak.flatten(jets[perms[...,3]].mass).to_numpy()
     
-    return features
+    return features.astype(np.float32), perm_counts
 
 
 # %% [markdown]
@@ -260,7 +269,7 @@ def jet_pt_resolution(pt):
 
 
 class TtbarAnalysis(processor.ProcessorABC):
-    def __init__(self, disable_processing, io_file_percent):
+    def __init__(self, disable_processing, io_file_percent, model_name, model_vers, url, permutations_dict):
         num_bins = 25
         bin_low = 50
         bin_high = 550
@@ -276,6 +285,12 @@ class TtbarAnalysis(processor.ProcessorABC):
         )
         self.disable_processing = disable_processing
         self.io_file_percent = io_file_percent
+        
+        # for ML inference with Triton
+        self.model_name = model_name
+        self.model_vers = model_vers
+        self.url = url
+        self.permutations_dict = permutations_dict
 
     def only_do_IO(self, events):
         # standard AGC branches cover 2.7% of the data
@@ -340,16 +355,24 @@ class TtbarAnalysis(processor.ProcessorABC):
             xsec_weight = x_sec * lumi / nevts_total
         else:
             xsec_weight = 1
+            
+        # setup triton gRPC client
+        triton_client = grpcclient.InferenceServerClient(url=self.url)
+        model_metadata = triton_client.get_model_metadata(self.model_name, self.model_vers)
+        input_name = model_metadata.inputs[0].name
+        dtype = model_metadata.inputs[0].datatype
+        output_name = model_metadata.outputs[0].name
+        
 
         #### systematics
-        # example of a simple flat weight variation, using the coffea nanoevents systematics feature
+        #example of a simple flat weight variation, using the coffea nanoevents systematics feature
         if process == "wjets":
             events.add_systematic("scale_var", "UpDownSystematic", "weight", flat_variation)
 
-        # jet energy scale / resolution systematics
-        # need to adjust schema to instead use coffea add_systematic feature, especially for ServiceX
-        # cannot attach pT variations to events.jet, so attach to events directly
-        # and subsequently scale pT by these scale factors
+        #jet energy scale / resolution systematics
+        #need to adjust schema to instead use coffea add_systematic feature, especially for ServiceX
+        #cannot attach pT variations to events.jet, so attach to events directly
+        #and subsequently scale pT by these scale factors
         events["pt_nominal"] = 1.0
         events["pt_scale_up"] = 1.03
         events["pt_res_up"] = jet_pt_resolution(events.Jet.pt)
@@ -393,10 +416,13 @@ class TtbarAnalysis(processor.ProcessorABC):
                         else events[pt_var][jet_filter][event_filters][region_filter]
                     )
                     observable = ak.sum(selected_jets_region.pt * pt_var_modifier, axis=-1)
+                    ML_observable = observable
 
                 elif region == "4j2b":
                     region_filter = ak.sum(selected_jets.btagCSVV2 > B_TAG_THRESHOLD, axis=1) >= 2
                     selected_jets_region = selected_jets[region_filter]
+                    selected_electrons_region = selected_electrons[region_filter]
+                    selected_muons_region = selected_muons[region_filter]
 
                     # reconstruct hadronic top as bjj system with largest pT
                     # the jet energy scale / resolution effect is not propagated to this observable at the moment
@@ -407,12 +433,30 @@ class TtbarAnalysis(processor.ProcessorABC):
                     # pick trijet candidate with largest pT and calculate mass of system
                     trijet_mass = trijet["p4"][ak.argmax(trijet.p4.pt, axis=1, keepdims=True)].mass
                     observable = ak.flatten(trijet_mass)
-
+                    
+                    # get ml features
+                    features, perm_counts = get_features(selected_jets_region, selected_electrons_region, 
+                                                         selected_muons_region, self.permutations_dict)
+                    
+                    #calculate ml observable
+                    inpt = [grpcclient.InferInput(input_name, features.shape, dtype)]
+                    inpt[0].set_data_from_numpy(features)
+                    output = grpcclient.InferRequestedOutput(output_name)
+                    results = triton_client.infer(model_name=self.model_name, 
+                                                  inputs=inpt, 
+                                                  outputs=[output]).as_numpy(output_name)
+                    
+                    results = ak.unflatten(results[:, 1], perm_counts)
+                    which_combination = ak.argmax(results,axis=1)
+                    features_unflattened = ak.unflatten(features, perm_counts)
+                    ML_observable = ak.flatten(features_unflattened[ak.from_regular(which_combination[:, np.newaxis])])[...,10]
+                    # ML_observable = observable
+                    
                 ### histogram filling
                 if pt_var == "pt_nominal":
                     # nominal pT, but including 2-point systematics
                     histogram.fill(
-                            observable=observable, region=region, process=process,
+                            observable=observable, ml_observable=ML_observable, region=region, process=process,
                             variation=variation, weight=xsec_weight
                         )
 
@@ -425,7 +469,7 @@ class TtbarAnalysis(processor.ProcessorABC):
                                     f"weight_{weight_name}"][event_filters][region_filter]
                                 # fill histograms
                                 histogram.fill(
-                                    observable=observable, region=region, process=process,
+                                    observable=observable, ml_observable=ML_observable, region=region, process=process,
                                     variation=f"{weight_name}_{direction}", weight=xsec_weight*weight_variation
                                 )
 
@@ -438,24 +482,28 @@ class TtbarAnalysis(processor.ProcessorABC):
                                 else:
                                     weight_variation = 1 # no events selected
                                 histogram.fill(
-                                    observable=observable, region=region, process=process,
+                                    observable=observable, ml_observable=ML_observable, region=region, process=process,
                                     variation=f"{weight_name}_{direction}", weight=xsec_weight*weight_variation
                                 )
 
                 elif variation == "nominal":
                     # pT variations for nominal samples
                     histogram.fill(
-                            observable=observable, region=region, process=process,
+                            observable=observable, ml_observable=ML_observable, region=region, process=process,
                             variation=pt_var, weight=xsec_weight
                         )
 
-        output = {"nevents": {events.metadata["dataset"]: len(events)}, "hist": histogram}
-
+        
+        output = {"nevents": {events.metadata["dataset"]: len(events)},
+                  "training_entries": {events.metadata["dataset"]: len(features)},
+                  "nevents_reduced": {events.metadata["dataset"]: len(observable)},
+                  "hist": histogram}
+        # output = {"nevents": {events.metadata["dataset"]: len(events)}}
+        triton_client.close()
         return output
 
     def postprocess(self, accumulator):
         return accumulator
-
 
 # %% [markdown]
 # ### "Fileset" construction and metadata
@@ -468,6 +516,14 @@ fileset = utils.construct_fileset(N_FILES_MAX_PER_SAMPLE, use_xcache=False, af_n
 print(f"processes in fileset: {list(fileset.keys())}")
 print(f"\nexample of information in fileset:\n{{\n  'files': [{fileset['ttbar__nominal']['files'][0]}, ...],")
 print(f"  'metadata': {fileset['ttbar__nominal']['metadata']}\n}}")
+
+# %%
+keylist = list(fileset.keys())
+for key in keylist:
+    if not "nominal" in key: fileset.pop(key)
+
+# %%
+fileset
 
 
 # %% [markdown]
@@ -545,7 +601,8 @@ if USE_DASK:
 else:
     executor = processor.FuturesExecutor(workers=NUM_CORES)
         
-run = processor.Runner(executor=executor, schema=NanoAODSchema, savemetrics=True, metadata_cache={}, chunksize=CHUNKSIZE)
+run = processor.Runner(executor=executor, schema=NanoAODSchema, savemetrics=True, 
+                       metadata_cache={}, chunksize=CHUNKSIZE)#, maxchunks=1)
 
 if USE_SERVICEX:
     treename = "servicex"
@@ -556,12 +613,18 @@ else:
 filemeta = run.preprocess(fileset, treename=treename)  # pre-processing
 
 t0 = time.monotonic()
-all_histograms, metrics = run(fileset, treename, processor_instance=TtbarAnalysis(DISABLE_PROCESSING, IO_FILE_PERCENT))  # processing
+# processing
+all_histograms, metrics = run(fileset, treename, processor_instance=TtbarAnalysis(DISABLE_PROCESSING, IO_FILE_PERCENT, 
+                                                                                  MODEL_NAME, MODEL_VERSION, 
+                                                                                  TRITON_URL, permutations_dict)) 
 exec_time = time.monotonic() - t0
 
-all_histograms = all_histograms["hist"]
+# all_histograms = all_histograms["hist"]
 
 print(f"\nexecution took {exec_time:.2f} seconds")
+
+# %%
+all_histograms
 
 # %%
 # track metrics
@@ -603,13 +666,25 @@ print(f"amount of data read: {metrics['bytesread']/1000**2:.2f} MB")  # likely b
 # %%
 utils.set_style()
 
-all_histograms[120j::hist.rebin(2), "4j1b", :, "nominal"].stack("process")[::-1].plot(stack=True, histtype="fill", linewidth=1, edgecolor="grey")
+all_histograms["hist"][120j::hist.rebin(2), :, "4j1b", :, "nominal"].stack("process").project("observable").plot(stack=True, histtype="fill", linewidth=1, edgecolor="grey")
 plt.legend(frameon=False)
 plt.title(">= 4 jets, 1 b-tag")
 plt.xlabel("HT [GeV]");
 
 # %%
-all_histograms[:, "4j2b", :, "nominal"].stack("process")[::-1].plot(stack=True, histtype="fill", linewidth=1,edgecolor="grey")
+all_histograms["hist"][:, 120j::hist.rebin(2), "4j1b", :, "nominal"].stack("process").project("ml_observable").plot(stack=True, histtype="fill", linewidth=1, edgecolor="grey")
+plt.legend(frameon=False)
+plt.title(">= 4 jets, 1 b-tag")
+plt.xlabel("HT [GeV]");
+
+# %%
+all_histograms["hist"][:, :, "4j2b", :, "nominal"].stack("process").project("observable").plot(stack=True, histtype="fill", linewidth=1, edgecolor="grey")
+plt.legend(frameon=False)
+plt.title(">= 4 jets, >= 2 b-tags")
+plt.xlabel("$m_{bjj}$ [Gev]");
+
+# %%
+all_histograms["hist"][:, :, "4j2b", :, "nominal"].stack("process").project("ml_observable").plot(stack=True, histtype="fill", linewidth=1, edgecolor="grey")
 plt.legend(frameon=False)
 plt.title(">= 4 jets, >= 2 b-tags")
 plt.xlabel("$m_{bjj}$ [Gev]");

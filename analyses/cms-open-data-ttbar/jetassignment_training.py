@@ -92,7 +92,7 @@ MODEL_LOGGING = False
 N_FOLD = 5
 
 # number of trials (per model) for hyperparameter optimization. Total number of trials will be 2*N_TRIALS
-N_TRIALS = 4
+N_TRIALS = 10
 
 # name to use for saving model to triton server
 MODEL_NAME = "sigbkg_bdt"
@@ -101,7 +101,9 @@ MODEL_NAME = "sigbkg_bdt"
 WRITE_OVER = True
 
 # number of events to train with for each model (N events = 12*N dataset)
-N_EVENTS_TRAIN = 1000
+N_EVENTS_TRAIN = -1
+
+N_FEATURES = 28
 
 # %%
 # get dictionaries for permutation indices, associated labels, and evaluation matrices
@@ -214,20 +216,23 @@ def get_training_set(jets, electrons, muons, labels, permutations_dict, labels_d
     #### calculate features ####
     
     #### calculate features ####
-    features = np.zeros((sum(perm_counts),19))
+    features = np.zeros((sum(perm_counts),28))
     
     # grab lepton info
     leptons = ak.flatten(ak.concatenate((electrons, muons),axis=1),axis=-1)
 
+    feature_count = 0
+    
     # delta R between top1 and lepton
     features[:,0] = ak.flatten(np.sqrt((leptons.eta - jets[perms[...,3]].eta)**2 + 
                                        (leptons.phi - jets[perms[...,3]].phi)**2)).to_numpy()
 
-    # delta R between the two W
+    
+    #delta R between the two W
     features[:,1] = ak.flatten(np.sqrt((jets[perms[...,0]].eta - jets[perms[...,1]].eta)**2 + 
                                        (jets[perms[...,0]].phi - jets[perms[...,1]].phi)**2)).to_numpy()
 
-    # delta R between W and top2
+    #delta R between W and top2
     features[:,2] = ak.flatten(np.sqrt((jets[perms[...,0]].eta - jets[perms[...,2]].eta)**2 + 
                                        (jets[perms[...,0]].phi - jets[perms[...,2]].phi)**2)).to_numpy()
     features[:,3] = ak.flatten(np.sqrt((jets[perms[...,1]].eta - jets[perms[...,2]].eta)**2 + 
@@ -243,7 +248,6 @@ def get_training_set(jets, electrons, muons, labels, permutations_dict, labels_d
     features[:,6] = ak.flatten(np.abs(jets[perms[...,0]].phi - jets[perms[...,2]].phi)).to_numpy()
     features[:,7] = ak.flatten(np.abs(jets[perms[...,1]].phi - jets[perms[...,2]].phi)).to_numpy()
 
-
     # combined mass of top1 and lepton
     features[:,8] = ak.flatten((leptons + jets[perms[...,3]]).mass).to_numpy()
 
@@ -253,20 +257,36 @@ def get_training_set(jets, electrons, muons, labels, permutations_dict, labels_d
     # combined mass of W and top2
     features[:,10] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
                                  jets[perms[...,2]]).mass).to_numpy()
+    
+    feature_count+=1
+    # combined pT of W and top2
+    features[:,11] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
+                                 jets[perms[...,2]]).pt).to_numpy()
 
 
     # pt of every jet
-    features[:,11] = ak.flatten(jets[perms[...,0]].pt).to_numpy()
-    features[:,12] = ak.flatten(jets[perms[...,1]].pt).to_numpy()
-    features[:,13] = ak.flatten(jets[perms[...,2]].pt).to_numpy()
-    features[:,14] = ak.flatten(jets[perms[...,3]].pt).to_numpy()
-
+    features[:,12] = ak.flatten(jets[perms[...,0]].pt).to_numpy()
+    features[:,13] = ak.flatten(jets[perms[...,1]].pt).to_numpy()
+    features[:,14] = ak.flatten(jets[perms[...,2]].pt).to_numpy()
+    features[:,15] = ak.flatten(jets[perms[...,3]].pt).to_numpy()
 
     # mass of every jet
-    features[:,15] = ak.flatten(jets[perms[...,0]].mass).to_numpy()
-    features[:,16] = ak.flatten(jets[perms[...,1]].mass).to_numpy()
-    features[:,17] = ak.flatten(jets[perms[...,2]].mass).to_numpy()
-    features[:,18] = ak.flatten(jets[perms[...,3]].mass).to_numpy()
+    features[:,16] = ak.flatten(jets[perms[...,0]].mass).to_numpy()
+    features[:,17] = ak.flatten(jets[perms[...,1]].mass).to_numpy()
+    features[:,18] = ak.flatten(jets[perms[...,2]].mass).to_numpy()
+    features[:,19] = ak.flatten(jets[perms[...,3]].mass).to_numpy()
+    
+    # btagCSVV2 of every jet
+    features[:,20] = ak.flatten(jets[perms[...,0]].btagCSVV2).to_numpy()
+    features[:,21] = ak.flatten(jets[perms[...,1]].btagCSVV2).to_numpy()
+    features[:,22] = ak.flatten(jets[perms[...,2]].btagCSVV2).to_numpy()
+    features[:,23] = ak.flatten(jets[perms[...,3]].btagCSVV2).to_numpy()
+    
+    # qgl of every jet
+    features[:,24] = ak.flatten(jets[perms[...,0]].qgl).to_numpy()
+    features[:,25] = ak.flatten(jets[perms[...,1]].qgl).to_numpy()
+    features[:,26] = ak.flatten(jets[perms[...,2]].qgl).to_numpy()
+    features[:,27] = ak.flatten(jets[perms[...,3]].qgl).to_numpy()
     
     #### calculate combination-level labels ####
     permutation_labels = np.array(labels_dict[4])
@@ -437,12 +457,12 @@ output, metrics = run(fileset,
                       processor_instance = JetClassifier(permutations_dict, labels_dict))
 
 # %%
-# import pickle
-# pickle.dump(output, open("output_temp.p", "wb"))
+import pickle
+pickle.dump(output, open("output_temp4.p", "wb"))
 
 # %%
 import pickle
-output = pickle.load(open("output_temp.p", "rb"))
+output = pickle.load(open("output_temp4.p", "rb"))
 
 # %%
 # grab features and labels and convert to np array
@@ -459,6 +479,9 @@ even = np.repeat(even, 12)
 print(len(labels))
 print(len(labels)/12)
 print(sum(labels==1))
+
+# %%
+features.shape
 
 # %% [markdown]
 # The key for the labeling scheme is as follows
@@ -629,6 +652,35 @@ ax.set_xlim([0,600])
 fig.show()
 
 # %% tags=[]
+#### combined pT histogram ####
+
+# binning
+combinedpt_low = 0.0
+combinedpt_high = 1000.0
+combinedpt_numbins = 200
+legend_list = ["All Matches Correct", "Some Matches Correct", "No Matches Correct"]
+
+# define histogram
+h = hist.Hist(
+    hist.axis.Regular(combinedpt_numbins, combinedpt_low, combinedpt_high, 
+                      name="pt", label="pT [GeV]", flow=False),
+    hist.axis.StrCategory(legend_list, name="truthlabel", label="Truth Label"),
+)
+
+# fill histogram
+h.fill(pt = all_correct[:,11], truthlabel="All Matches Correct")
+h.fill(pt = some_correct[:,11], truthlabel="Some Matches Correct")
+h.fill(pt = none_correct[:,11], truthlabel="No Matches Correct")
+
+# make plots
+fig,ax = plt.subplots(1,1,figsize=(8,4))
+h.plot(density=True, ax=ax)
+ax.legend(legend_list)
+ax.set_title("Combined pT of W jets and top2 jet")
+ax.set_xlim([0,600])
+fig.show()
+
+# %% tags=[]
 #### pT histogram ####
 
 # binning
@@ -646,18 +698,18 @@ h = hist.Hist(
 )
 
 # fill histogram
-h.fill(jetpt = all_correct[:,11], category="W", truthlabel="All Matches Correct")
-h.fill(jetpt = some_correct[:,11], category="W", truthlabel="Some Matches Correct")
-h.fill(jetpt = none_correct[:,11], category="W", truthlabel="No Matches Correct")
 h.fill(jetpt = all_correct[:,12], category="W", truthlabel="All Matches Correct")
 h.fill(jetpt = some_correct[:,12], category="W", truthlabel="Some Matches Correct")
 h.fill(jetpt = none_correct[:,12], category="W", truthlabel="No Matches Correct")
-h.fill(jetpt = all_correct[:,13], category="top2", truthlabel="All Matches Correct")
-h.fill(jetpt = some_correct[:,13], category="top2", truthlabel="Some Matches Correct")
-h.fill(jetpt = none_correct[:,13], category="top2", truthlabel="No Matches Correct")
-h.fill(jetpt = all_correct[:,14], category="top1", truthlabel="All Matches Correct")
-h.fill(jetpt = some_correct[:,14], category="top1", truthlabel="Some Matches Correct")
-h.fill(jetpt = none_correct[:,14], category="top1", truthlabel="No Matches Correct")
+h.fill(jetpt = all_correct[:,13], category="W", truthlabel="All Matches Correct")
+h.fill(jetpt = some_correct[:,13], category="W", truthlabel="Some Matches Correct")
+h.fill(jetpt = none_correct[:,13], category="W", truthlabel="No Matches Correct")
+h.fill(jetpt = all_correct[:,14], category="top2", truthlabel="All Matches Correct")
+h.fill(jetpt = some_correct[:,14], category="top2", truthlabel="Some Matches Correct")
+h.fill(jetpt = none_correct[:,14], category="top2", truthlabel="No Matches Correct")
+h.fill(jetpt = all_correct[:,15], category="top1", truthlabel="All Matches Correct")
+h.fill(jetpt = some_correct[:,15], category="top1", truthlabel="Some Matches Correct")
+h.fill(jetpt = none_correct[:,15], category="top1", truthlabel="No Matches Correct")
 
 # make plots
 fig,ax = plt.subplots(1,1,figsize=(8,4))
@@ -699,18 +751,18 @@ h = hist.Hist(
 )
 
 # fill histogram
-h.fill(jetmass = all_correct[:,15], category="W", truthlabel="All Matches Correct")
-h.fill(jetmass = some_correct[:,15], category="W", truthlabel="Some Matches Correct")
-h.fill(jetmass = none_correct[:,15], category="W", truthlabel="No Matches Correct")
 h.fill(jetmass = all_correct[:,16], category="W", truthlabel="All Matches Correct")
 h.fill(jetmass = some_correct[:,16], category="W", truthlabel="Some Matches Correct")
 h.fill(jetmass = none_correct[:,16], category="W", truthlabel="No Matches Correct")
-h.fill(jetmass = all_correct[:,17], category="top2", truthlabel="All Matches Correct")
-h.fill(jetmass = some_correct[:,17], category="top2", truthlabel="Some Matches Correct")
-h.fill(jetmass = none_correct[:,17], category="top2", truthlabel="No Matches Correct")
-h.fill(jetmass = all_correct[:,18], category="top1", truthlabel="All Matches Correct")
-h.fill(jetmass = some_correct[:,18], category="top1", truthlabel="Some Matches Correct")
-h.fill(jetmass = none_correct[:,18], category="top1", truthlabel="No Matches Correct")
+h.fill(jetmass = all_correct[:,17], category="W", truthlabel="All Matches Correct")
+h.fill(jetmass = some_correct[:,17], category="W", truthlabel="Some Matches Correct")
+h.fill(jetmass = none_correct[:,17], category="W", truthlabel="No Matches Correct")
+h.fill(jetmass = all_correct[:,18], category="top2", truthlabel="All Matches Correct")
+h.fill(jetmass = some_correct[:,18], category="top2", truthlabel="Some Matches Correct")
+h.fill(jetmass = none_correct[:,18], category="top2", truthlabel="No Matches Correct")
+h.fill(jetmass = all_correct[:,19], category="top1", truthlabel="All Matches Correct")
+h.fill(jetmass = some_correct[:,19], category="top1", truthlabel="Some Matches Correct")
+h.fill(jetmass = none_correct[:,19], category="top1", truthlabel="No Matches Correct")
 
 # make plots
 fig,ax = plt.subplots(1,1,figsize=(8,4))
@@ -731,6 +783,106 @@ ax.legend(legend_list)
 ax.set_title("top1 Jet Mass")
 fig.show()
 
+# %%
+#### btag histogram ####
+
+# binning
+btag_low = 0.0
+btag_high = 1.0
+btag_numbins = 50
+legend_list = ["All Matches Correct", "Some Matches Correct", "No Matches Correct"]
+
+# define histogram
+h = hist.Hist(
+    hist.axis.Regular(btag_numbins, btag_low, btag_high, 
+                      name="btag", label="Jet btag", flow=False),
+    hist.axis.StrCategory(legend_list, name="truthlabel", label="Truth Label"),
+    hist.axis.StrCategory(["W","top1","top2"], name="category", label="Category"),
+)
+
+# fill histogram
+h.fill(btag = all_correct[:,20], category="W", truthlabel="All Matches Correct")
+h.fill(btag = some_correct[:,20], category="W", truthlabel="Some Matches Correct")
+h.fill(btag = none_correct[:,20], category="W", truthlabel="No Matches Correct")
+h.fill(btag = all_correct[:,21], category="W", truthlabel="All Matches Correct")
+h.fill(btag = some_correct[:,21], category="W", truthlabel="Some Matches Correct")
+h.fill(btag = none_correct[:,21], category="W", truthlabel="No Matches Correct")
+h.fill(btag = all_correct[:,22], category="top2", truthlabel="All Matches Correct")
+h.fill(btag = some_correct[:,22], category="top2", truthlabel="Some Matches Correct")
+h.fill(btag = none_correct[:,22], category="top2", truthlabel="No Matches Correct")
+h.fill(btag = all_correct[:,23], category="top1", truthlabel="All Matches Correct")
+h.fill(btag = some_correct[:,23], category="top1", truthlabel="Some Matches Correct")
+h.fill(btag = none_correct[:,23], category="top1", truthlabel="No Matches Correct")
+
+# make plots
+fig,ax = plt.subplots(1,1,figsize=(8,4))
+h[:, :, "W"].plot(density=True, ax=ax)
+ax.legend(legend_list)
+ax.set_title("W Jet btag")
+fig.show()
+
+fig,ax = plt.subplots(1,1,figsize=(8,4))
+h[:, :, "top2"].plot(density=True, ax=ax)
+ax.legend(legend_list)
+ax.set_title("top2 Jet btag")
+fig.show()
+
+fig,ax = plt.subplots(1,1,figsize=(8,4))
+h[:, :, "top1"].plot(density=True, ax=ax)
+ax.legend(legend_list)
+ax.set_title("top1 Jet btag")
+fig.show()
+
+# %%
+#### qgl histogram ####
+
+# binning
+qgl_low = -1.0
+qgl_high = 1.0
+qgl_numbins = 50
+legend_list = ["All Matches Correct", "Some Matches Correct", "No Matches Correct"]
+
+# define histogram
+h = hist.Hist(
+    hist.axis.Regular(qgl_numbins, qgl_low, qgl_high, 
+                      name="qgl", label="Jet qgl", flow=False),
+    hist.axis.StrCategory(legend_list, name="truthlabel", label="Truth Label"),
+    hist.axis.StrCategory(["W","top1","top2"], name="category", label="Category"),
+)
+
+# fill histogram
+h.fill(qgl = all_correct[:,24], category="W", truthlabel="All Matches Correct")
+h.fill(qgl = some_correct[:,24], category="W", truthlabel="Some Matches Correct")
+h.fill(qgl = none_correct[:,24], category="W", truthlabel="No Matches Correct")
+h.fill(qgl = all_correct[:,25], category="W", truthlabel="All Matches Correct")
+h.fill(qgl = some_correct[:,25], category="W", truthlabel="Some Matches Correct")
+h.fill(qgl = none_correct[:,25], category="W", truthlabel="No Matches Correct")
+h.fill(qgl = all_correct[:,26], category="top2", truthlabel="All Matches Correct")
+h.fill(qgl = some_correct[:,26], category="top2", truthlabel="Some Matches Correct")
+h.fill(qgl = none_correct[:,26], category="top2", truthlabel="No Matches Correct")
+h.fill(qgl = all_correct[:,27], category="top1", truthlabel="All Matches Correct")
+h.fill(qgl = some_correct[:,27], category="top1", truthlabel="Some Matches Correct")
+h.fill(qgl = none_correct[:,27], category="top1", truthlabel="No Matches Correct")
+
+# make plots
+fig,ax = plt.subplots(1,1,figsize=(8,4))
+h[:, :, "W"].plot(density=True, ax=ax)
+ax.legend(legend_list)
+ax.set_title("W Jet qgl")
+fig.show()
+
+fig,ax = plt.subplots(1,1,figsize=(8,4))
+h[:, :, "top2"].plot(density=True, ax=ax)
+ax.legend(legend_list)
+ax.set_title("top2 Jet qgl")
+fig.show()
+
+fig,ax = plt.subplots(1,1,figsize=(8,4))
+h[:, :, "top1"].plot(density=True, ax=ax)
+ax.legend(legend_list)
+ax.set_title("top1 Jet qgl")
+fig.show()
+
 # %% [markdown]
 # # Model Optimization
 #
@@ -743,7 +895,7 @@ labels = output['labels'].value
 labels[labels==-1]=0 # partially correct = wrong
 even = output['even'].value
 
-features = features.reshape((int(features.shape[0]/12),12,19))
+features = features.reshape((int(features.shape[0]/12),12,N_FEATURES))
 labels = labels.reshape((int(labels.shape[0]/12),12))
 
 shuffle_indices = np.array(range(features.shape[0])).astype(int)
@@ -755,13 +907,13 @@ which_combination = np.argmax(labels,axis=-1)
 even = even[shuffle_indices]
 
 features_even = features[even]
-features_even = features_even.reshape((int(12*features_even.shape[0]),19))
+features_even = features_even.reshape((int(12*features_even.shape[0]),N_FEATURES))
 labels_even = labels[even]
 labels_even = labels_even.reshape((int(12*labels_even.shape[0]),))
 which_combination_even = which_combination[even]
 
 features_odd = features[np.invert(even)]
-features_odd = features_odd.reshape((int(12*features_odd.shape[0]),19))
+features_odd = features_odd.reshape((int(12*features_odd.shape[0]),N_FEATURES))
 labels_odd = labels[np.invert(even)]
 labels_odd = labels_odd.reshape((int(12*labels_odd.shape[0]),))
 which_combination_odd = which_combination[np.invert(even)]
@@ -777,11 +929,11 @@ features_even = power.fit_transform(features_even)
 features_odd = power.fit_transform(features_odd)
 
 # %%
-# define environment variables locally
-# %env MLFLOW_TRACKING_URI=https://mlflow.software-dev.ncsa.cloud
-# %env MLFLOW_S3_ENDPOINT_URL=https://mlflow-minio-api.software-dev.ncsa.cloud
-# %env AWS_ACCESS_KEY_ID=
-# %env AWS_SECRET_ACCESS_KEY=
+# # define environment variables locally
+# # %env MLFLOW_TRACKING_URI=https://mlflow.software-dev.ncsa.cloud
+# # %env MLFLOW_S3_ENDPOINT_URL=https://mlflow-minio-api.software-dev.ncsa.cloud
+# # %env AWS_ACCESS_KEY_ID=
+# # %env AWS_SECRET_ACCESS_KEY=
 
 # %%
 # set up trials
@@ -796,36 +948,36 @@ if USE_MLFLOW:
 
     # create runs ahead of time (avoids conflicts when parallelizing mlflow logging)
     run_id_list=[]
-    for n in range(N_TRIALS*2):
+    for n in range(N_TRIALS):
         run = MlflowClient().create_run(experiment_id=experiment_id, run_name=f"run-{n}")
         run_id_list.append(run.info.run_id)
 
 # %%
-sampler = ParameterSampler({'max_depth': np.arange(2,30,2,dtype=int), 
-                            'n_estimators': np.arange(50,700,20,dtype=int), 
-                            'learning_rate': np.logspace(-5, -1, 10),
+sampler = ParameterSampler({'max_depth': np.arange(10,80,10,dtype=int), 
+                            'n_estimators': np.arange(300,500,50,dtype=int), 
+                            'learning_rate': np.logspace(-3, -1, 5),
                             'min_child_weight': np.logspace(-1, 2, 20), 
                             'reg_lambda': [0, 0.25, 0.5, 0.75, 1], 
                             'reg_alpha': [0, 0.25, 0.5, 0.75, 1],
                             'gamma': np.logspace(-4, 1, 20),
                             'tree_method': ["hist"],}, 
                             n_iter = N_TRIALS, 
-                            random_state=34) 
+                            random_state=2) 
 
 samples_even = list(sampler)
-samples_odd = list(sampler)
+# samples_odd = list(sampler)
 
 # add additional info to each trial
 for i in range(N_TRIALS):
     samples_even[i]['trial_num'] = i
     samples_even[i]['parity'] = 'even' # categorizes this trial as for even event numbers
     
-    samples_odd[i]['trial_num'] = i
-    samples_odd[i]['parity'] = 'odd' # categorizes this trial as for odd event numbers
+    # samples_odd[i]['trial_num'] = i
+    # samples_odd[i]['parity'] = 'odd' # categorizes this trial as for odd event numbers
     
     if USE_MLFLOW: 
         samples_even[i]['run_id'] = run_id_list[i]
-        samples_odd[i]['run_id'] = run_id_list[i+N_TRIALS]
+        # samples_odd[i]['run_id'] = run_id_list[i+N_TRIALS]
     
 print("Example of Trial Parameters: ")
 samples_even[0]
@@ -841,9 +993,9 @@ else:
 # %%
 def modified_cross_validation(model, 
                               features, labels, 
-                              evaluation_matrix, n_folds=2):
-        
-    features = features.reshape((int(features.shape[0]/12),12,19))
+                              evaluation_matrix, n_folds=2, N_FEATURES=20):
+            
+    features = features.reshape((int(features.shape[0]/12),12,N_FEATURES))
     labels = labels.reshape((int(labels.shape[0]/12),12))
     which_combination = np.argmax(labels, axis=-1)
         
@@ -868,7 +1020,7 @@ def modified_cross_validation(model,
     for n in range(n_folds):
         
         features_test = features[splits[n]]
-        features_test = features_test.reshape((12*features_test.shape[0],19))
+        features_test = features_test.reshape((12*features_test.shape[0],N_FEATURES))
         labels_test = labels[splits[n]]
         labels_test = labels_test.reshape((12*labels_test.shape[0],))
         which_combination_test = which_combination[splits[n]]
@@ -876,11 +1028,11 @@ def modified_cross_validation(model,
         train_ind = np.concatenate([splits[i] for i in range(n_folds) if not i==n])
         
         features_train = features[train_ind]
-        features_train = features_train.reshape((12*features_train.shape[0],19))
+        features_train = features_train.reshape((12*features_train.shape[0],N_FEATURES))
         labels_train = labels[train_ind]
         labels_train = labels_train.reshape((12*labels_train.shape[0],))
         which_combination_train = which_combination[train_ind]
-        
+                
         model.fit(features_train, labels_train)
         
         test_predictions = model.predict(features_test)
@@ -899,8 +1051,8 @@ def modified_cross_validation(model,
         train_roc_auc[n] = roc_auc_score(labels_train, train_predictions)
         
         
-        test_predictions_prob = model.predict_proba(features_test)[:,0]
-        train_predictions_prob = model.predict_proba(features_train)[:,0]
+        test_predictions_prob = model.predict_proba(features_test)[:,1]
+        train_predictions_prob = model.predict_proba(features_train)[:,1]
         test_predictions_prob = test_predictions_prob.reshape((int(test_predictions_prob.shape[0]/12),12))
         train_predictions_prob = train_predictions_prob.reshape((int(train_predictions_prob.shape[0]/12),12))
         
@@ -941,17 +1093,18 @@ def fit_model(params,
               labels, 
               evaluation_matrix,
               n_folds,
+              N_FEATURES=20,
               mlflowclient=None,
               use_mlflow=False,
               log_models=False): 
-                    
+                            
     if use_mlflow:
         
         run_id = params["run_id"]
         
         for param_name, value in params.items():
             mlflowclient.log_param(run_id, param_name, value)
-        
+            
     # remove parameters that are not used for XGBClassifier
     params_copy = params.copy()
     params_copy.pop("trial_num")
@@ -963,10 +1116,9 @@ def fit_model(params,
                           nthread=-1,
                           **params_copy) 
 
-
     # perform n-fold cross-validation
     result = modified_cross_validation(model, features, labels,
-                                      evaluation_matrix, n_folds=n_folds)
+                                      evaluation_matrix, n_folds=n_folds, N_FEATURES=N_FEATURES)
     
     if use_mlflow:
         for metric, value in result.items():
@@ -975,7 +1127,7 @@ def fit_model(params,
 
         # manually end run
         mlflowclient.set_terminated(run_id)
-        
+                
     return {"score": np.average(result["test_jet_score"]),
             "full_result": result}
 
@@ -986,14 +1138,17 @@ def initialize_mlflow():
     
     os.environ['MLFLOW_TRACKING_URI'] = "https://mlflow.software-dev.ncsa.cloud"
     os.environ['MLFLOW_S3_ENDPOINT_URL'] = "https://mlflow-minio-api.software-dev.ncsa.cloud"
-    os.environ['AWS_ACCESS_KEY_ID'] = ""
-    os.environ['AWS_SECRET_ACCESS_KEY'] = ""
+    os.environ['AWS_ACCESS_KEY_ID'] = "bengal1"
+    os.environ['AWS_SECRET_ACCESS_KEY'] = "leftfoot1"
     
     mlflow.set_tracking_uri('https://mlflow.software-dev.ncsa.cloud') 
     mlflow.set_experiment("agc-training-demo")
 
 
-# %%
+# %% tags=[]
+N_FOLD=2
+USE_DASK_ML=True
+
 if USE_DASK_ML:
     start_time = time.time() 
     
@@ -1002,10 +1157,11 @@ if USE_DASK_ML:
     
     futures = client.map(fit_model,
                          samples_even, 
-                         features=features_even[:N_EVENTS_TRAIN*12], 
-                         labels=labels_even[:N_EVENTS_TRAIN*12],
+                         features=features_even, 
+                         labels=labels_even,
                          evaluation_matrix=evaluation_matrix,
                          n_folds=N_FOLD,
+                         N_FEATURES=N_FEATURES,
                          mlflowclient=mlflowclient,
                          use_mlflow=USE_MLFLOW,
                          log_models=MODEL_LOGGING) 
@@ -1015,16 +1171,21 @@ if USE_DASK_ML:
     
 else:
     start_time = time.time() 
-    res = np.zeros(len(samples_even))
+    res = []
     for i in range(len(samples_even)):
-        res[i] = fit_model(samples_even[i], 
-                           features=features_even[:N_EVENTS_TRAIN*12],
-                           labels=labels_even[:N_EVENTS_TRAIN*12], 
+        print("_____________________________________________________________")
+        print(i)
+        print(samples_even[i])
+        res.append(fit_model(samples_even[i], 
+                           features=features_even,
+                           labels=labels_even, 
                            evaluation_matrix=evaluation_matrix,
                            n_folds=N_FOLD,
+                           N_FEATURES=N_FEATURES,
                            mlflowclient=mlflowclient,
                            use_mlflow=USE_MLFLOW,
-                           model_logging=MODEL_LOGGING)
+                           log_models=MODEL_LOGGING))
+        print(res[i])
     time_elapsed = time.time() - start_time
 
 print("Hyperparameter optimization took time = ", time_elapsed)
@@ -1036,10 +1197,19 @@ print("best_parameters_even = ")
 best_parameters_even
 
 # %%
-best_model_even = res[np.argmax(scores)]["full_result"]["model"]
-best_model_even.save_model("models/model_xgb_230301_even.model")
+print(scores)
 
 # %%
+# best_model_even = res[np.argmax(scores)]["full_result"]["model"]
+# best_model_even.save_model("models/model_xgb_230303_even5.model")
+
+# %%
+for i in range(len(samples_even)):
+
+    model = res[i]["full_result"]["model"]
+    model.save_model(f"models/testmodel_{i}.model")
+
+# %% tags=[]
 if USE_DASK_ML:
     start_time = time.time() 
     
@@ -1052,6 +1222,7 @@ if USE_DASK_ML:
                          labels=labels_odd[:N_EVENTS_TRAIN*12],
                          evaluation_matrix=evaluation_matrix,
                          n_folds=N_FOLD,
+                         N_FEATURES=N_FEATURES,
                          mlflowclient=mlflowclient,
                          use_mlflow=USE_MLFLOW,
                          log_models=MODEL_LOGGING) 
@@ -1068,6 +1239,7 @@ else:
                            labels=labels_odd[:N_EVENTS_TRAIN*12], 
                            evaluation_matrix=evaluation_matrix,
                            n_folds=N_FOLD,
+                           N_FEATURES=N_FEATURES,
                            mlflowclient=mlflowclient,
                            use_mlflow=USE_MLFLOW,
                            model_logging=MODEL_LOGGING)
@@ -1081,21 +1253,21 @@ best_parameters_odd = samples_odd[np.argmax(scores)]
 print("best_parameters_odd = ")
 best_parameters_odd
 
-# %%
+# %% jupyter={"source_hidden": true} tags=[]
 best_model_odd = res[np.argmax(scores)]["full_result"]["model"]
-best_model_odd.save_model("models/model_xgb_230301_odd.model")
+best_model_odd.save_model("models/model_xgb_230303_odd5.model")
 
 # %% [markdown]
 # # Evaluation with Optimized Model
 
-# %%
+# %% jupyter={"source_hidden": true} tags=[]
 # make predictions
 train_predicted = best_model_even.predict(features_even)
 train_predicted_prob = best_model_even.predict_proba(features_even)[:, 1]
 val_predicted = best_model_even.predict(features_odd)
 val_predicted_prob = best_model_even.predict_proba(features_odd)[:, 1]
 
-# %%
+# %% jupyter={"source_hidden": true, "outputs_hidden": true} tags=[]
 train_accuracy = accuracy_score(labels_even, train_predicted).round(3)
 train_precision = precision_score(labels_even, train_predicted).round(3)
 train_recall = recall_score(labels_even, train_predicted).round(3)
@@ -1119,7 +1291,7 @@ print("Validation Recall = ", val_recall)
 print("Validation f1 = ", val_f1)
 print("Validation AUC = ", val_aucroc)
 
-# %%
+# %% jupyter={"source_hidden": true, "outputs_hidden": true} tags=[]
 val_predicted_prob = val_predicted_prob.reshape((int(len(val_predicted_prob)/12),12))
 val_predicted_combination = np.argmax(val_predicted_prob,axis=1)
     
@@ -1147,14 +1319,14 @@ for i in range(len(which_combination_even)):
 score = sum(scores)/len(scores)
 print("Training Jet Score = ", score)
 
-# %%
+# %% jupyter={"source_hidden": true} tags=[]
 # make predictions
 train_predicted = best_model_odd.predict(features_odd)
 train_predicted_prob = best_model_odd.predict_proba(features_odd)[:, 1]
 val_predicted = best_model_odd.predict(features_even)
 val_predicted_prob = best_model_odd.predict_proba(features_even)[:, 1]
 
-# %%
+# %% jupyter={"source_hidden": true, "outputs_hidden": true} tags=[]
 train_accuracy = accuracy_score(labels_odd, train_predicted).round(3)
 train_precision = precision_score(labels_odd, train_predicted).round(3)
 train_recall = recall_score(labels_odd, train_predicted).round(3)
@@ -1178,7 +1350,7 @@ print("Validation Recall = ", val_recall)
 print("Validation f1 = ", val_f1)
 print("Validation AUC = ", val_aucroc)
 
-# %%
+# %% jupyter={"source_hidden": true, "outputs_hidden": true} tags=[]
 val_predicted_prob = val_predicted_prob.reshape((int(len(val_predicted_prob)/12),12))
 val_predicted_combination = np.argmax(val_predicted_prob,axis=1)
     
@@ -1197,7 +1369,7 @@ print("How many events are 0% correct: ", sum(scores==0)/len(scores), ", Random 
 
 train_predicted_prob = train_predicted_prob.reshape((int(len(train_predicted_prob)/12),12))
 train_predicted_combination = np.argmax(train_predicted_prob,axis=1)
-    
+
 scores = np.zeros(len(which_combination_odd))
 zipped = list(zip(which_combination_odd.tolist(), train_predicted_combination.tolist()))
 for i in range(len(which_combination_odd)):
@@ -1205,3 +1377,82 @@ for i in range(len(which_combination_odd)):
         
 score = sum(scores)/len(scores)
 print("Training Jet Score = ", score)
+
+# %% [markdown]
+# ### mbjj test
+
+# %%
+# grab features and labels and convert to np array
+features = output['features'].value
+labels = output['labels'].value
+even = output['even'].value
+observable = output['observable'].value
+
+labels = labels.reshape((len(labels),))
+even = np.repeat(even, 12)
+
+# %%
+features_reshaped = features.reshape((int(len(features)/12),12,N_FEATURES))
+top_mass_candidates = features_reshaped[:,:,10]
+observable_list = observable.astype(np.float32).tolist()
+all_correct_top_mass = features[labels==1,10]
+
+# %%
+#### mass histogram ####
+
+# binning
+combinedmass_low = 0.0
+combinedmass_high = 1500.0
+combinedmass_numbins = 200
+
+legendlist=["Truth","Jet Triplet with Largest pT"]
+
+# define histogram
+h = hist.Hist(
+    hist.axis.Regular(combinedmass_numbins, combinedmass_low, combinedmass_high, 
+                      name="combinedmass", label="Reconstructed Top Mass [GeV]", flow=False),
+    hist.axis.StrCategory(legendlist, name="truthlabel", label="Truth Label", growth=True),
+)
+
+# fill histogram
+h.fill(combinedmass = all_correct_top_mass, truthlabel="Truth")
+h.fill(combinedmass = observable_list, truthlabel="Jet Triplet with Largest pT")
+
+# %%
+all_correct_top_mass
+
+# %%
+for i in range(len(samples_even)):
+    
+    test_model = XGBClassifier()
+    test_model.load_model(f"models/testmodel_{i}.model")
+    ind = np.argwhere(test_model.classes_==1)[0][0] # make sure we take the correct index...
+    
+    predictions = test_model.predict_proba(features)[:,ind]
+    predictions = predictions.reshape((int(len(predictions)/12),12))
+    which_combination = np.argmin(predictions,axis=-1)
+    
+    top_mass = np.zeros(features_reshaped.shape[0])
+    for j in range(len(top_mass)):
+        top_mass[j] = top_mass_candidates[j,which_combination[j]]
+        
+    plt.hist(observable_list,bins=np.linspace(0,1000,100),density=True,histtype='step')
+    plt.hist(all_correct_top_mass,bins=np.linspace(0,1000,100),density=True,histtype='step')
+    plt.hist(top_mass,bins=np.linspace(0,1000,100),density=True,histtype='step')
+    plt.legend(["Jet Triplet with Largest pT","Truth",f"BDT #{i}"])
+    plt.show()
+        
+    h.fill(combinedmass = top_mass, truthlabel=f"BDT #{i}")
+    legendlist.append(f"BDT #{i}")
+
+# %%
+fig,ax = plt.subplots(1,1,figsize=(8,8))
+h.plot(density=True, ax=ax)
+ax.legend(legendlist)
+ax.set_title("Reconstructed Top Mass")
+ax.set_xlim([0,600])
+fig.show()
+
+# %%
+
+# %%

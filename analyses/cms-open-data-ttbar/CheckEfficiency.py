@@ -337,6 +337,27 @@ MAX_N_JETS = 6
 
 # %%
 ### SCORE NOT SEPARATED BY NJET
+for MAX_N_JETS in range(4,10):
+    print("MAX_N_JETS = ", MAX_N_JETS)
+    jets, electrons, muons, labels = filterEvents(events.Jet, events.Electron, events.Muon, events.GenPart, 4, MAX_N_JETS)
+
+    trijet = ak.combinations(jets, 3, fields=["j1", "j2", "j3"])  # trijet candidates
+    trijet_labels = ak.combinations(labels, 3, fields=["j1", "j2", "j3"])
+    trijet["p4"] = trijet.j1 + trijet.j2 + trijet.j3  # calculate four-momentum of tri-jet system
+    trijet["label"] = trijet_labels.j1 + trijet_labels.j2 + trijet_labels.j3
+    trijet["max_btag"] = np.maximum(trijet.j1.btagCSVV2, np.maximum(trijet.j2.btagCSVV2, trijet.j3.btagCSVV2))
+    trijet = trijet[trijet.max_btag > 0.5]  # at least one-btag in trijet candidates
+    # pick trijet candidate with largest pT and calculate mass of system
+    trijet_mass = trijet["p4"][ak.argmax(trijet.p4.pt, axis=1, keepdims=True)].mass
+    trijet_label = trijet["label"]
+    observable = ak.flatten(trijet_mass)
+    trijet_label = ak.flatten(trijet_label)
+    print("   Fraction Correct = ", sum(trijet_label==24+24+6)/len(trijet_label))
+    print("   Fraction Wrong Top = ", sum(trijet_label==24+24-6)/len(trijet_label))
+    print("   Fraction Wrong W = ", sum(trijet_label==24+6-6)/len(trijet_label))
+
+# %%
+### SCORE NOT SEPARATED BY NJET
 
 jets, electrons, muons, labels = filterEvents(events.Jet, events.Electron, events.Muon, events.GenPart, 4, MAX_N_JETS)
 print("filtered events")
@@ -437,6 +458,25 @@ fig.show()
 # Next, we evaluate the performance for all events in which it is possible to fully reconstruct, but separate the calculations by number of jets (and type of jet/jet label)
 
 # %%
+for n in range(4,10):
+    print("Number of Jets = ", n)
+    jets, electrons, muons, labels = filterEvents(events.Jet, events.Electron, events.Muon, events.GenPart, n, n)
+    trijet = ak.combinations(jets, 3, fields=["j1", "j2", "j3"])  # trijet candidates
+    trijet_labels = ak.combinations(labels, 3, fields=["j1", "j2", "j3"])
+    trijet["p4"] = trijet.j1 + trijet.j2 + trijet.j3  # calculate four-momentum of tri-jet system
+    trijet["label"] = trijet_labels.j1 + trijet_labels.j2 + trijet_labels.j3
+    trijet["max_btag"] = np.maximum(trijet.j1.btagCSVV2, np.maximum(trijet.j2.btagCSVV2, trijet.j3.btagCSVV2))
+    trijet = trijet[trijet.max_btag > 0.5]  # at least one-btag in trijet candidates
+    # pick trijet candidate with largest pT and calculate mass of system
+    trijet_mass = trijet["p4"][ak.argmax(trijet.p4.pt, axis=1, keepdims=True)].mass
+    trijet_label = trijet["label"]
+    observable = ak.flatten(trijet_mass)
+    trijet_label = ak.flatten(trijet_label)
+    print("   Fraction Correct = ", sum(trijet_label==24+24+6)/len(trijet_label))
+    print("   Fraction Wrong Top = ", sum(trijet_label==24+24-6)/len(trijet_label))
+    print("   Fraction Wrong W = ", sum(trijet_label==24+6-6)/len(trijet_label))
+
+# %%
 # scores not separated by jet label
 bdt_score_dict = {}
 random_score_dict = {}
@@ -458,6 +498,22 @@ for n in range(4,MAX_N_JETS+1):
     # filter data
     jets, electrons, muons, labels = filterEvents(events.Jet, events.Electron, events.Muon, events.GenPart, n, n)
     print("    filtered events")
+    
+    trijet = ak.combinations(jets, 3, fields=["j1", "j2", "j3"])  # trijet candidates
+    trijet_labels = ak.combinations(labels, 3, fields=["j1", "j2", "j3"])
+    trijet["p4"] = trijet.j1 + trijet.j2 + trijet.j3  # calculate four-momentum of tri-jet system
+    trijet["label"] = trijet_labels.j1 + trijet_labels.j2 + trijet_labels.j3
+    trijet["max_btag"] = np.maximum(trijet.j1.btagCSVV2, np.maximum(trijet.j2.btagCSVV2, trijet.j3.btagCSVV2))
+    trijet = trijet[trijet.max_btag > B_TAG_THRESHOLD]  # at least one-btag in trijet candidates
+    # pick trijet candidate with largest pT and calculate mass of system
+    trijet_mass = trijet["p4"][ak.argmax(trijet.p4.pt, axis=1, keepdims=True)].mass
+    trijet_label = trijet["label"]
+    observable = ak.flatten(trijet_mass)
+    trijet_label = ak.flatten(trijet_label)
+    print("    Calculated by Original Method")
+    print("        Fraction Correct = ", sum(trijet_label==24+24+6)/len(output["trijet_label"].value))
+    print("        Fraction Wrong Top = ", sum(trijet_label==24+24-6)/len(output["trijet_label"].value))
+    print("        Fraction Wrong W = ", sum(trijet_label==24+6-6)/len(output["trijet_label"].value))
     
     njet = ak.num(jets).to_numpy()
     njet[njet>max(permutations_dict.keys())] = max(permutations_dict.keys())
@@ -619,6 +675,26 @@ fig.show()
 # # Evaluation 3
 #
 # Now we want to see the effect of `MAX_N_JETS` on overall efficiency. So we will not filter to events that are fully reconstructable.
+
+# %%
+for MAX_N_JETS in range(4,10):
+    jets, electrons, muons, labels = filterEvents(events.Jet, events.Electron, events.Muon, events.GenPart, 
+                                                  4, MAX_N_JETS, reconstructable=False)
+
+    trijet = ak.combinations(jets, 3, fields=["j1", "j2", "j3"])  # trijet candidates
+    trijet_labels = ak.combinations(labels, 3, fields=["j1", "j2", "j3"])
+    trijet["p4"] = trijet.j1 + trijet.j2 + trijet.j3  # calculate four-momentum of tri-jet system
+    trijet["label"] = trijet_labels.j1 + trijet_labels.j2 + trijet_labels.j3
+    trijet["max_btag"] = np.maximum(trijet.j1.btagCSVV2, np.maximum(trijet.j2.btagCSVV2, trijet.j3.btagCSVV2))
+    trijet = trijet[trijet.max_btag > 0.5]  # at least one-btag in trijet candidates
+    # pick trijet candidate with largest pT and calculate mass of system
+    trijet_mass = trijet["p4"][ak.argmax(trijet.p4.pt, axis=1, keepdims=True)].mass
+    trijet_label = trijet["label"]
+    observable = ak.flatten(trijet_mass)
+    trijet_label = ak.flatten(trijet_label)
+    print("   Fraction Correct = ", sum(trijet_label==24+24+6)/len(trijet_label))
+    print("   Fraction Wrong Top = ", sum(trijet_label==24+24-6)/len(trijet_label))
+    print("   Fraction Wrong W = ", sum(trijet_label==24+6-6)/len(trijet_label))
 
 # %%
 MAX_N_JETS_LIST = list(range(4,6)) # values of MAX_N_JETS to consider

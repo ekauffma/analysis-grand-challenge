@@ -63,7 +63,7 @@ import onnx
 ### GLOBAL CONFIGURATION
 
 # input files per process, set to e.g. 10 (smaller number = faster, want to use larger number for training)
-N_FILES_MAX_PER_SAMPLE = -1
+N_FILES_MAX_PER_SAMPLE = 5
 
 # set to True for DaskExecutor
 USE_DASK_PROCESSING = True
@@ -389,32 +389,38 @@ class JetClassifier(processor_base):
                                                                    selected_genpart_region,
                                                                    even)
             
-            # calculate features and labels
-            features, labels, which_combination = get_training_set(jets, electrons, muons, labels,
-                                                                   self.permutations_dict, self.labels_dict)
-    
+            
             # calculate mbjj
             # reconstruct hadronic top as bjj system with largest pT
             # the jet energy scale / resolution effect is not propagated to this observable at the moment
             trijet = ak.combinations(jets, 3, fields=["j1", "j2", "j3"])  # trijet candidates
+            trijet_labels = ak.combinations(labels, 3, fields=["j1", "j2", "j3"])
             trijet["p4"] = trijet.j1 + trijet.j2 + trijet.j3  # calculate four-momentum of tri-jet system
+            trijet["label"] = trijet_labels.j1 + trijet_labels.j2 + trijet_labels.j3
             trijet["max_btag"] = np.maximum(trijet.j1.btagCSVV2, np.maximum(trijet.j2.btagCSVV2, trijet.j3.btagCSVV2))
             trijet = trijet[trijet.max_btag > B_TAG_THRESHOLD]  # at least one-btag in trijet candidates
             # pick trijet candidate with largest pT and calculate mass of system
             trijet_mass = trijet["p4"][ak.argmax(trijet.p4.pt, axis=1, keepdims=True)].mass
+            trijet_label = trijet["label"]
             observable = ak.flatten(trijet_mass)
+            trijet_label = ak.flatten(trijet_label)
+            
+            # calculate features and labels
+            features, labels, which_combination = get_training_set(jets, electrons, muons, labels,
+                                                                   self.permutations_dict, self.labels_dict)
+    
             
         output = {"nevents": {events.metadata["dataset"]: len(events)},
                   "features": col_accumulator(features.tolist()),
                   "labels": col_accumulator(labels.tolist()),
                   "observable": col_accumulator(observable.tolist()),
-                  "even": col_accumulator(even.tolist())}
+                  "even": col_accumulator(even.tolist()),
+                  "trijet_label": col_accumulator(trijet_label.tolist()),}
             
         return output
         
     def postprocess(self, accumulator):
         return accumulator
-
 
 # %% [markdown]
 # ### "Fileset" construction and metadata
@@ -455,6 +461,20 @@ filemeta = run.preprocess(fileset, treename="Events")
 output, metrics = run(fileset, 
                       "Events", 
                       processor_instance = JetClassifier(permutations_dict, labels_dict))
+
+# %%
+print("Fraction Correct = ", sum(output["trijet_label"].value==24+24+6)/len(output["trijet_label"].value))
+print("Fraction Wrong Top = ", sum(output["trijet_label"].value==24+24-6)/len(output["trijet_label"].value))
+print("Fraction Wrong W = ", sum(output["trijet_label"].value==24+6-6)/len(output["trijet_label"].value))
+
+# %%
+trijet_label = output["trijet_label"].value
+
+# %%
+
+# %%
+
+# %%
 
 # %%
 import pickle
@@ -1253,21 +1273,21 @@ best_parameters_odd = samples_odd[np.argmax(scores)]
 print("best_parameters_odd = ")
 best_parameters_odd
 
-# %% jupyter={"source_hidden": true} tags=[]
+# %% tags=[]
 best_model_odd = res[np.argmax(scores)]["full_result"]["model"]
 best_model_odd.save_model("models/model_xgb_230303_odd5.model")
 
 # %% [markdown]
 # # Evaluation with Optimized Model
 
-# %% jupyter={"source_hidden": true} tags=[]
+# %% tags=[]
 # make predictions
 train_predicted = best_model_even.predict(features_even)
 train_predicted_prob = best_model_even.predict_proba(features_even)[:, 1]
 val_predicted = best_model_even.predict(features_odd)
 val_predicted_prob = best_model_even.predict_proba(features_odd)[:, 1]
 
-# %% jupyter={"source_hidden": true, "outputs_hidden": true} tags=[]
+# %% jupyter={"outputs_hidden": true} tags=[]
 train_accuracy = accuracy_score(labels_even, train_predicted).round(3)
 train_precision = precision_score(labels_even, train_predicted).round(3)
 train_recall = recall_score(labels_even, train_predicted).round(3)
@@ -1291,7 +1311,7 @@ print("Validation Recall = ", val_recall)
 print("Validation f1 = ", val_f1)
 print("Validation AUC = ", val_aucroc)
 
-# %% jupyter={"source_hidden": true, "outputs_hidden": true} tags=[]
+# %% jupyter={"outputs_hidden": true} tags=[]
 val_predicted_prob = val_predicted_prob.reshape((int(len(val_predicted_prob)/12),12))
 val_predicted_combination = np.argmax(val_predicted_prob,axis=1)
     
@@ -1319,14 +1339,14 @@ for i in range(len(which_combination_even)):
 score = sum(scores)/len(scores)
 print("Training Jet Score = ", score)
 
-# %% jupyter={"source_hidden": true} tags=[]
+# %% tags=[]
 # make predictions
 train_predicted = best_model_odd.predict(features_odd)
 train_predicted_prob = best_model_odd.predict_proba(features_odd)[:, 1]
 val_predicted = best_model_odd.predict(features_even)
 val_predicted_prob = best_model_odd.predict_proba(features_even)[:, 1]
 
-# %% jupyter={"source_hidden": true, "outputs_hidden": true} tags=[]
+# %% jupyter={"outputs_hidden": true} tags=[]
 train_accuracy = accuracy_score(labels_odd, train_predicted).round(3)
 train_precision = precision_score(labels_odd, train_predicted).round(3)
 train_recall = recall_score(labels_odd, train_predicted).round(3)
@@ -1350,7 +1370,7 @@ print("Validation Recall = ", val_recall)
 print("Validation f1 = ", val_f1)
 print("Validation AUC = ", val_aucroc)
 
-# %% jupyter={"source_hidden": true, "outputs_hidden": true} tags=[]
+# %% jupyter={"outputs_hidden": true} tags=[]
 val_predicted_prob = val_predicted_prob.reshape((int(len(val_predicted_prob)/12),12))
 val_predicted_combination = np.argmax(val_predicted_prob,axis=1)
     

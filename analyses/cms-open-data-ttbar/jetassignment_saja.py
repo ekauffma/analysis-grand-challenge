@@ -20,6 +20,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import awkward as ak
+import dataclasses
 
 
 # %%
@@ -101,11 +102,46 @@ def filterEvents(jets, electrons, muons, genpart):
     labels_flat = np.abs(ak.fill_none(ak.flatten(parent_pdgid),100).to_numpy())
     labels_flat[has_both_cousins_flat] = -6 # assign jets with both cousins as top1
     
-    labels = ak.unflatten(labels_flat, jet_counts)
+    # W jet labels
+    labels_W_flat = np.copy(labels_flat)
+    labels_W_flat[labels_W_flat!=24]=0
+    labels_W_flat[labels_W_flat==24]=1
+    labels_W = ak.unflatten(labels_W_flat, jet_counts)
+    
+    
+    # top1 jet labels
+    labels_top1_flat = np.copy(labels_flat)
+    labels_top1_flat[labels_top1_flat!=-6]=0
+    labels_top1_flat[labels_top1_flat==-6]=1
+    labels_top1 = ak.unflatten(labels_top1_flat, jet_counts)
+    
+    # top2 jet labels
+    labels_top2_flat = np.copy(labels_flat)
+    labels_top2_flat[labels_top2_flat!=6]=0
+    labels_top2_flat[labels_top2_flat==6]=1
+    labels_top2 = ak.unflatten(labels_top2_flat, jet_counts)
+    
+    # top2 jet labels
+    labels_other_flat = np.zeros(labels_flat.shape)
+    labels_other_flat[(labels_flat!=6) & (labels_flat!=-6) & (labels_flat!=24)]=1
+    labels_other = ak.unflatten(labels_other_flat, jet_counts)
+    
+    # labels = ak.concatenate([x[..., np.newaxis] for x in ak.unzip(labels)], axis=1)
+    labels = ak.concatenate([labels_W[..., np.newaxis],
+                             labels_top1[..., np.newaxis],
+                             labels_top2[..., np.newaxis],
+                             labels_other[..., np.newaxis]],axis=2)
+    print(labels_W[0])
+    print(labels_top1[0])
+    print(labels_top2[0])
+    print(labels_other[0])
+    print(labels[0])
+    
+    labels_id = ak.unflatten(labels_flat, jet_counts)
 
-    has_W = ak.sum(labels==24,axis=-1) == 2
-    has_top2 = ak.sum(labels==6,axis=-1) == 1
-    has_top1 = ak.sum(labels==-6,axis=-1) == 1
+    has_W = ak.sum(labels_id==24,axis=-1) == 2
+    has_top2 = ak.sum(labels_id==6,axis=-1) == 1
+    has_top1 = ak.sum(labels_id==-6,axis=-1) == 1
     training_event_filter = has_W & has_top2 & has_top1
 
     selected_jets_region = selected_jets_region[training_event_filter]
@@ -134,7 +170,27 @@ jets, electrons, muons, labels = filterEvents(events.Jet, events.Electron,
                                               events.Muon, events.GenPart)
 
 # %%
-len(jets)
+for i in range(20):
+    print(jets.pt[i])
+    print(labels[i])
+    print()
+
+# %%
+print(len(jets.pt))
+print(len(labels))
+
+
+# %%
+@dataclasses.dataclass
+class Batch:
+    data: torch.Tensor
+    target: torch.Tensor
+    length: torch.Tensor
+    mask: torch.Tensor
+
+    def to(self, device):
+        return Batch(*[each.to(device) for each in dataclasses.astuple(self)])
+
 
 # %%
 features = [jets.pt, jets.eta, jets.phi, jets.mass]
@@ -145,8 +201,16 @@ njets = ak.num(features_awkward)
 features_padded = torch.nn.utils.rnn.pad_sequence([torch.Tensor(features_awkward[i]) 
                                                    for i in range(len(features_awkward))], batch_first=True) 
 mask = get_data_mask(features_padded,njets)
+labels_torch = torch.nn.utils.rnn.pad_sequence([torch.Tensor(labels[i])
+                                                for i in range(len(labels))], batch_first=True) 
+
+dataset = Batch(features_padded, labels_torch, torch.LongTensor(njets), mask)
 
 # %%
-labels
+ievt = 32
+print(dataset.data[ievt])
+print(dataset.length[ievt])
+print(dataset.mask[ievt])
+print(dataset.target[ievt])
 
 # %%

@@ -212,9 +212,6 @@ def get_training_set(jets, electrons, muons, labels, permutations_dict, labels_d
     perms = ak.Array([permutations_dict[n] for n in njet])
     perm_counts = ak.num(perms)
     
-    
-    #### calculate features ####
-    
     #### calculate features ####
     features = np.zeros((sum(perm_counts),28))
     
@@ -401,7 +398,7 @@ class JetClassifier(processor_base):
             trijet = trijet[trijet.max_btag > B_TAG_THRESHOLD]  # at least one-btag in trijet candidates
             # pick trijet candidate with largest pT and calculate mass of system
             trijet_mass = trijet["p4"][ak.argmax(trijet.p4.pt, axis=1, keepdims=True)].mass
-            trijet_label = trijet["label"]
+            trijet_label = trijet["label"][ak.argmax(trijet.p4.pt, axis=1, keepdims=True)]
             observable = ak.flatten(trijet_mass)
             trijet_label = ak.flatten(trijet_label)
             
@@ -463,20 +460,6 @@ output, metrics = run(fileset,
                       processor_instance = JetClassifier(permutations_dict, labels_dict))
 
 # %%
-print("Fraction Correct = ", sum(output["trijet_label"].value==24+24+6)/len(output["trijet_label"].value))
-print("Fraction Wrong Top = ", sum(output["trijet_label"].value==24+24-6)/len(output["trijet_label"].value))
-print("Fraction Wrong W = ", sum(output["trijet_label"].value==24+6-6)/len(output["trijet_label"].value))
-
-# %%
-trijet_label = output["trijet_label"].value
-
-# %%
-
-# %%
-
-# %%
-
-# %%
 import pickle
 pickle.dump(output, open("output_temp4.p", "wb"))
 
@@ -493,6 +476,9 @@ observable = output['observable'].value
 
 labels = labels.reshape((len(labels),))
 even = np.repeat(even, 12)
+
+# %%
+features.shape
 
 # %%
 # investigate labels
@@ -1412,6 +1398,10 @@ labels = labels.reshape((len(labels),))
 even = np.repeat(even, 12)
 
 # %%
+power = PowerTransformer(method='yeo-johnson', standardize=True)
+features_preprocessed = power.fit_transform(features)
+
+# %%
 features_reshaped = features.reshape((int(len(features)/12),12,N_FEATURES))
 top_mass_candidates = features_reshaped[:,:,10]
 observable_list = observable.astype(np.float32).tolist()
@@ -1439,16 +1429,12 @@ h.fill(combinedmass = all_correct_top_mass, truthlabel="Truth")
 h.fill(combinedmass = observable_list, truthlabel="Jet Triplet with Largest pT")
 
 # %%
-all_correct_top_mass
-
-# %%
-for i in range(len(samples_even)):
+for i in range(10):
     
     test_model = XGBClassifier()
     test_model.load_model(f"models/testmodel_{i}.model")
-    ind = np.argwhere(test_model.classes_==1)[0][0] # make sure we take the correct index...
     
-    predictions = test_model.predict_proba(features)[:,ind]
+    predictions = test_model.predict_proba(features_preprocessed)[:,0]
     predictions = predictions.reshape((int(len(predictions)/12),12))
     which_combination = np.argmin(predictions,axis=-1)
     

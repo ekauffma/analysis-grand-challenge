@@ -68,6 +68,7 @@ from mlflow.tracking import MlflowClient
 from xgboost import XGBClassifier
 from xgboost import plot_tree
 import tritonclient.grpc as grpcclient
+from sklearn.preprocessing import PowerTransformer
 
 import utils  # contains code for bookkeeping and cosmetics, as well as some boilerplate
 
@@ -101,10 +102,10 @@ logging.getLogger("cabinetry").setLevel(logging.INFO)
 ### GLOBAL CONFIGURATION
 
 # input files per process, set to e.g. 10 (smaller number = faster)
-N_FILES_MAX_PER_SAMPLE = 1
+N_FILES_MAX_PER_SAMPLE = 5
 
 # enable Dask (currently will not work with Triton inference)
-USE_DASK = False
+USE_DASK = True
 
 # enable ServiceX
 USE_SERVICEX = False
@@ -119,7 +120,7 @@ AF = "coffea_casa"
 ### BENCHMARKING-SPECIFIC SETTINGS
 
 # chunk size to use
-CHUNKSIZE = 10_000
+CHUNKSIZE = 100_000
 
 # metadata to propagate through to metrics
 AF_NAME = "coffea_casa"  # "ssl-dev" allows for the switch to local data on /data
@@ -138,6 +139,11 @@ IO_FILE_PERCENT = 2.7
 
 # maximum number of jets to consider for reconstruction BDT
 MAX_N_JETS = 6
+
+# whether to use NVIDIA Triton for inference (uses xgboost otherwise)
+USE_TRITON = False
+
+XGBOOST_MODEL_PATH = "models/testmodel_0.model"
 
 # name of model loaded in triton server
 MODEL_NAME = "reconstruction_bdt_xgb"
@@ -182,20 +188,23 @@ def get_features(jets, electrons, muons, permutations_dict):
     perm_counts = ak.num(perms)
     
     #### calculate features ####
-    features = np.zeros((sum(perm_counts),19))
+    features = np.zeros((sum(perm_counts),28))
     
     # grab lepton info
     leptons = ak.flatten(ak.concatenate((electrons, muons),axis=1),axis=-1)
 
+    feature_count = 0
+    
     # delta R between top1 and lepton
     features[:,0] = ak.flatten(np.sqrt((leptons.eta - jets[perms[...,3]].eta)**2 + 
                                        (leptons.phi - jets[perms[...,3]].phi)**2)).to_numpy()
 
-    # delta R between the two W
+    
+    #delta R between the two W
     features[:,1] = ak.flatten(np.sqrt((jets[perms[...,0]].eta - jets[perms[...,1]].eta)**2 + 
                                        (jets[perms[...,0]].phi - jets[perms[...,1]].phi)**2)).to_numpy()
 
-    # delta R between W and top2
+    #delta R between W and top2
     features[:,2] = ak.flatten(np.sqrt((jets[perms[...,0]].eta - jets[perms[...,2]].eta)**2 + 
                                        (jets[perms[...,0]].phi - jets[perms[...,2]].phi)**2)).to_numpy()
     features[:,3] = ak.flatten(np.sqrt((jets[perms[...,1]].eta - jets[perms[...,2]].eta)**2 + 
@@ -211,7 +220,6 @@ def get_features(jets, electrons, muons, permutations_dict):
     features[:,6] = ak.flatten(np.abs(jets[perms[...,0]].phi - jets[perms[...,2]].phi)).to_numpy()
     features[:,7] = ak.flatten(np.abs(jets[perms[...,1]].phi - jets[perms[...,2]].phi)).to_numpy()
 
-
     # combined mass of top1 and lepton
     features[:,8] = ak.flatten((leptons + jets[perms[...,3]]).mass).to_numpy()
 
@@ -221,20 +229,36 @@ def get_features(jets, electrons, muons, permutations_dict):
     # combined mass of W and top2
     features[:,10] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
                                  jets[perms[...,2]]).mass).to_numpy()
+    
+    feature_count+=1
+    # combined pT of W and top2
+    features[:,11] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
+                                 jets[perms[...,2]]).pt).to_numpy()
 
 
-#     # pt of every jet
-    features[:,11] = ak.flatten(jets[perms[...,0]].pt).to_numpy()
-    features[:,12] = ak.flatten(jets[perms[...,1]].pt).to_numpy()
-    features[:,13] = ak.flatten(jets[perms[...,2]].pt).to_numpy()
-    features[:,14] = ak.flatten(jets[perms[...,3]].pt).to_numpy()
-
+    # pt of every jet
+    features[:,12] = ak.flatten(jets[perms[...,0]].pt).to_numpy()
+    features[:,13] = ak.flatten(jets[perms[...,1]].pt).to_numpy()
+    features[:,14] = ak.flatten(jets[perms[...,2]].pt).to_numpy()
+    features[:,15] = ak.flatten(jets[perms[...,3]].pt).to_numpy()
 
     # mass of every jet
-    features[:,15] = ak.flatten(jets[perms[...,0]].mass).to_numpy()
-    features[:,16] = ak.flatten(jets[perms[...,1]].mass).to_numpy()
-    features[:,17] = ak.flatten(jets[perms[...,2]].mass).to_numpy()
-    features[:,18] = ak.flatten(jets[perms[...,3]].mass).to_numpy()
+    features[:,16] = ak.flatten(jets[perms[...,0]].mass).to_numpy()
+    features[:,17] = ak.flatten(jets[perms[...,1]].mass).to_numpy()
+    features[:,18] = ak.flatten(jets[perms[...,2]].mass).to_numpy()
+    features[:,19] = ak.flatten(jets[perms[...,3]].mass).to_numpy()
+    
+    # btagCSVV2 of every jet
+    features[:,20] = ak.flatten(jets[perms[...,0]].btagCSVV2).to_numpy()
+    features[:,21] = ak.flatten(jets[perms[...,1]].btagCSVV2).to_numpy()
+    features[:,22] = ak.flatten(jets[perms[...,2]].btagCSVV2).to_numpy()
+    features[:,23] = ak.flatten(jets[perms[...,3]].btagCSVV2).to_numpy()
+    
+    # qgl of every jet
+    features[:,24] = ak.flatten(jets[perms[...,0]].qgl).to_numpy()
+    features[:,25] = ak.flatten(jets[perms[...,1]].qgl).to_numpy()
+    features[:,26] = ak.flatten(jets[perms[...,2]].qgl).to_numpy()
+    features[:,27] = ak.flatten(jets[perms[...,3]].qgl).to_numpy()
     
     return features.astype(np.float32), perm_counts
 
@@ -269,7 +293,7 @@ def jet_pt_resolution(pt):
 
 
 class TtbarAnalysis(processor.ProcessorABC):
-    def __init__(self, disable_processing, io_file_percent, model_name, model_vers, url, permutations_dict):
+    def __init__(self, disable_processing, io_file_percent, use_triton, xgboost_model, model_name, model_vers, url, permutations_dict):
         num_bins = 25
         bin_low = 50
         bin_high = 550
@@ -286,7 +310,9 @@ class TtbarAnalysis(processor.ProcessorABC):
         self.disable_processing = disable_processing
         self.io_file_percent = io_file_percent
         
-        # for ML inference with Triton
+        # for ML inference
+        self.use_triton = use_triton
+        self.xgboost_model = xgboost_model
         self.model_name = model_name
         self.model_vers = model_vers
         self.url = url
@@ -356,12 +382,13 @@ class TtbarAnalysis(processor.ProcessorABC):
         else:
             xsec_weight = 1
             
-        # setup triton gRPC client
-        triton_client = grpcclient.InferenceServerClient(url=self.url)
-        model_metadata = triton_client.get_model_metadata(self.model_name, self.model_vers)
-        input_name = model_metadata.inputs[0].name
-        dtype = model_metadata.inputs[0].datatype
-        output_name = model_metadata.outputs[0].name
+        if self.use_triton:
+            # setup triton gRPC client
+            triton_client = grpcclient.InferenceServerClient(url=self.url)
+            model_metadata = triton_client.get_model_metadata(self.model_name, self.model_vers)
+            input_name = model_metadata.inputs[0].name
+            dtype = model_metadata.inputs[0].datatype
+            output_name = model_metadata.outputs[0].name
         
 
         #### systematics
@@ -437,15 +464,20 @@ class TtbarAnalysis(processor.ProcessorABC):
                     # get ml features
                     features, perm_counts = get_features(selected_jets_region, selected_electrons_region, 
                                                          selected_muons_region, self.permutations_dict)
+                    power = PowerTransformer(method='yeo-johnson', standardize=True)
                     
                     #calculate ml observable
-                    inpt = [grpcclient.InferInput(input_name, features.shape, dtype)]
-                    inpt[0].set_data_from_numpy(features)
-                    output = grpcclient.InferRequestedOutput(output_name)
-                    results = triton_client.infer(model_name=self.model_name, 
-                                                  inputs=inpt, 
-                                                  outputs=[output]).as_numpy(output_name)
+                    if self.use_triton:
+                        inpt = [grpcclient.InferInput(input_name, features.shape, dtype)]
+                        inpt[0].set_data_from_numpy(power.fit_transform(features))
+                        output = grpcclient.InferRequestedOutput(output_name)
+                        results = triton_client.infer(model_name=self.model_name, 
+                                                      inputs=inpt, 
+                                                      outputs=[output]).as_numpy(output_name)
                     
+                    else:
+                        results = self.xgboost_model.predict_proba(power.fit_transform(features))
+                        
                     results = ak.unflatten(results[:, 1], perm_counts)
                     which_combination = ak.argmax(results,axis=1)
                     features_unflattened = ak.unflatten(features, perm_counts)
@@ -498,8 +530,10 @@ class TtbarAnalysis(processor.ProcessorABC):
                   "training_entries": {events.metadata["dataset"]: len(features)},
                   "nevents_reduced": {events.metadata["dataset"]: len(observable)},
                   "hist": histogram}
-        # output = {"nevents": {events.metadata["dataset"]: len(events)}}
-        triton_client.close()
+        
+        if self.use_triton:
+            triton_client.close()
+            
         return output
 
     def postprocess(self, accumulator):
@@ -516,14 +550,6 @@ fileset = utils.construct_fileset(N_FILES_MAX_PER_SAMPLE, use_xcache=False, af_n
 print(f"processes in fileset: {list(fileset.keys())}")
 print(f"\nexample of information in fileset:\n{{\n  'files': [{fileset['ttbar__nominal']['files'][0]}, ...],")
 print(f"  'metadata': {fileset['ttbar__nominal']['metadata']}\n}}")
-
-# %%
-keylist = list(fileset.keys())
-for key in keylist:
-    if not "nominal" in key: fileset.pop(key)
-
-# %%
-fileset
 
 
 # %% [markdown]
@@ -612,9 +638,13 @@ else:
     
 filemeta = run.preprocess(fileset, treename=treename)  # pre-processing
 
+model = XGBClassifier()
+model.load_model(XGBOOST_MODEL_PATH)
+
 t0 = time.monotonic()
 # processing
 all_histograms, metrics = run(fileset, treename, processor_instance=TtbarAnalysis(DISABLE_PROCESSING, IO_FILE_PERCENT, 
+                                                                                  USE_TRITON, model,
                                                                                   MODEL_NAME, MODEL_VERSION, 
                                                                                   TRITON_URL, permutations_dict)) 
 exec_time = time.monotonic() - t0
@@ -624,7 +654,8 @@ exec_time = time.monotonic() - t0
 print(f"\nexecution took {exec_time:.2f} seconds")
 
 # %%
-all_histograms
+import pickle
+all_histograms = pickle.load(open("all_histograms_temp.p","rb"))
 
 # %%
 # track metrics
@@ -700,23 +731,32 @@ plt.xlabel("$m_{bjj}$ [Gev]");
 
 # %%
 # b-tagging variations
-all_histograms[120j::hist.rebin(2), "4j1b", "ttbar", "nominal"].plot(label="nominal", linewidth=2)
-all_histograms[120j::hist.rebin(2), "4j1b", "ttbar", "btag_var_0_up"].plot(label="NP 1", linewidth=2)
-all_histograms[120j::hist.rebin(2), "4j1b", "ttbar", "btag_var_1_up"].plot(label="NP 2", linewidth=2)
-all_histograms[120j::hist.rebin(2), "4j1b", "ttbar", "btag_var_2_up"].plot(label="NP 3", linewidth=2)
-all_histograms[120j::hist.rebin(2), "4j1b", "ttbar", "btag_var_3_up"].plot(label="NP 4", linewidth=2)
+all_histograms["hist"][120j::hist.rebin(2), :, "4j1b", "ttbar", "nominal"].project("observable").plot(label="nominal", linewidth=2)
+all_histograms["hist"][120j::hist.rebin(2), :, "4j1b", "ttbar", "btag_var_0_up"].project("observable").plot(label="NP 1", linewidth=2)
+all_histograms["hist"][120j::hist.rebin(2), :, "4j1b", "ttbar", "btag_var_1_up"].project("observable").plot(label="NP 2", linewidth=2)
+all_histograms["hist"][120j::hist.rebin(2), :, "4j1b", "ttbar", "btag_var_2_up"].project("observable").plot(label="NP 3", linewidth=2)
+all_histograms["hist"][120j::hist.rebin(2), :, "4j1b", "ttbar", "btag_var_3_up"].project("observable").plot(label="NP 4", linewidth=2)
 plt.legend(frameon=False)
 plt.xlabel("HT [GeV]")
 plt.title("b-tagging variations");
 
 # %%
 # jet energy scale variations
-all_histograms[:, "4j2b", "ttbar", "nominal"].plot(label="nominal", linewidth=2)
-all_histograms[:, "4j2b", "ttbar", "pt_scale_up"].plot(label="scale up", linewidth=2)
-all_histograms[:, "4j2b", "ttbar", "pt_res_up"].plot(label="resolution up", linewidth=2)
+all_histograms["hist"][:, :, "4j2b", "ttbar", "nominal"].project("observable").plot(label="nominal", linewidth=2)
+all_histograms["hist"][:, :, "4j2b", "ttbar", "pt_scale_up"].project("observable").plot(label="scale up", linewidth=2)
+all_histograms["hist"][:, :, "4j2b", "ttbar", "pt_res_up"].project("observable").plot(label="resolution up", linewidth=2)
 plt.legend(frameon=False)
 plt.xlabel("$m_{bjj}$ [Gev]")
-plt.title("Jet energy variations");
+plt.title("Jet energy variations (Trijet combination method)");
+plt.show()
+
+all_histograms["hist"][:, :, "4j2b", "ttbar", "nominal"].project("ml_observable").plot(label="nominal", linewidth=2)
+all_histograms["hist"][:, :, "4j2b", "ttbar", "pt_scale_up"].project("ml_observable").plot(label="scale up", linewidth=2)
+all_histograms["hist"][:, :, "4j2b", "ttbar", "pt_res_up"].project("ml_observable").plot(label="resolution up", linewidth=2)
+plt.legend(frameon=False)
+plt.xlabel("$m_{bjj}$ [Gev]")
+plt.title("Jet energy variations (BDT method)");
+plt.show()
 
 # %% [markdown]
 # ### Save histograms to disk
@@ -725,7 +765,7 @@ plt.title("Jet energy variations");
 # This also builds pseudo-data by combining events from the various simulation setups we have processed.
 
 # %%
-utils.save_histograms(all_histograms, fileset, "histograms.root")
+utils.save_histograms(all_histograms["hist"], fileset, "histograms.root", ml=False)
 
 # %% [markdown]
 # ### Statistical inference

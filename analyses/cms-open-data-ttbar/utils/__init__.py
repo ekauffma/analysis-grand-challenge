@@ -94,40 +94,140 @@ def construct_fileset(n_files_max_per_sample, use_xcache=False, af_name=""):
     return fileset
 
 
-def save_histograms(all_histograms, fileset, filename):
+def save_histograms(all_histograms, fileset, filename, ml=False):
     nominal_samples = [sample for sample in fileset.keys() if "nominal" in sample]
 
     all_histograms += 1e-6  # add minimal event count to all bins to avoid crashes when processing a small number of samples
 
-    pseudo_data = (all_histograms[:, :, "ttbar", "ME_var"] + all_histograms[:, :, "ttbar", "PS_var"]) / 2  + all_histograms[:, :, "wjets", "nominal"]
+    pseudo_data = (all_histograms[:, :, :, "ttbar", "ME_var"] + all_histograms[:, :, :, "ttbar", "PS_var"]) / 2  + all_histograms[:, :, :, "wjets", "nominal"]
 
     with uproot.recreate(filename) as f:
         for region in ["4j1b", "4j2b"]:
-            f[f"{region}_pseudodata"] = pseudo_data[120j::hist.rebin(2), region]
+            if not ml:
+                f[f"{region}_pseudodata"] = pseudo_data[120j::hist.rebin(2), 
+                                                        120j::hist.rebin(2), 
+                                                        region].project("observable")
+            else:
+                f[f"{region}_pseudodata"] = pseudo_data[120j::hist.rebin(2), 
+                                                        120j::hist.rebin(2), 
+                                                        region].project("ml_observable")
             for sample in nominal_samples:
                 sample_name = sample.split("__")[0]
-                f[f"{region}_{sample_name}"] = all_histograms[120j::hist.rebin(2), region, sample_name, "nominal"]
+                if not ml:
+                    f[f"{region}_{sample_name}"] = all_histograms[120j::hist.rebin(2), 
+                                                                  120j::hist.rebin(2), 
+                                                                  region, 
+                                                                  sample_name, 
+                                                                  "nominal"].project("observable")
+                else:
+                    f[f"{region}_{sample_name}"] = all_histograms[120j::hist.rebin(2), 
+                                                                  120j::hist.rebin(2), 
+                                                                  region, 
+                                                                  sample_name, 
+                                                                  "nominal"].project("ml_observable")
 
                 # b-tagging variations
                 for i in range(4):
                     for direction in ["up", "down"]:
                         variation_name = f"btag_var_{i}_{direction}"
-                        f[f"{region}_{sample_name}_{variation_name}"] = all_histograms[120j::hist.rebin(2), region, sample_name, variation_name]
+                        if not ml:
+                            f[f"{region}_{sample_name}_{variation_name}"] = all_histograms[120j::hist.rebin(2), 
+                                                                                           120j::hist.rebin(2), 
+                                                                                           region, 
+                                                                                           sample_name, 
+                                                                                           variation_name].project("observable")
+                        else:
+                            f[f"{region}_{sample_name}_{variation_name}"] = all_histograms[120j::hist.rebin(2), 
+                                                                                           120j::hist.rebin(2), 
+                                                                                           region, 
+                                                                                           sample_name, 
+                                                                                           variation_name].project("ml_observable")
 
                 # jet energy scale variations
                 for variation_name in ["pt_scale_up", "pt_res_up"]:
-                    f[f"{region}_{sample_name}_{variation_name}"] = all_histograms[120j::hist.rebin(2), region, sample_name, variation_name]
+                    if not ml:
+                        f[f"{region}_{sample_name}_{variation_name}"] = all_histograms[120j::hist.rebin(2), 
+                                                                                       120j::hist.rebin(2), 
+                                                                                       region, 
+                                                                                       sample_name, 
+                                                                                       variation_name].project("observable")
+                    else:
+                        f[f"{region}_{sample_name}_{variation_name}"] = all_histograms[120j::hist.rebin(2), 
+                                                                                       120j::hist.rebin(2), 
+                                                                                       region, 
+                                                                                       sample_name, 
+                                                                                       variation_name].project("ml_observable")
 
             # ttbar modeling
-            f[f"{region}_ttbar_ME_var"] = all_histograms[120j::hist.rebin(2), region, "ttbar", "ME_var"]
-            f[f"{region}_ttbar_PS_var"] = all_histograms[120j::hist.rebin(2), region, "ttbar", "PS_var"]
+            if not ml:
+                f[f"{region}_ttbar_ME_var"] = all_histograms[120j::hist.rebin(2), 
+                                                             120j::hist.rebin(2), 
+                                                             region, 
+                                                             "ttbar", 
+                                                             "ME_var"].project("observable")
+                f[f"{region}_ttbar_PS_var"] = all_histograms[120j::hist.rebin(2), 
+                                                             120j::hist.rebin(2), 
+                                                             region, 
+                                                             "ttbar", 
+                                                             "PS_var"].project("observable")
 
-            f[f"{region}_ttbar_scaledown"] = all_histograms[120j :: hist.rebin(2), region, "ttbar", "scaledown"]
-            f[f"{region}_ttbar_scaleup"] = all_histograms[120j :: hist.rebin(2), region, "ttbar", "scaleup"]
+                f[f"{region}_ttbar_scaledown"] = all_histograms[120j::hist.rebin(2), 
+                                                                120j::hist.rebin(2), 
+                                                                region, 
+                                                                "ttbar", 
+                                                                "scaledown"].project("observable")
+                f[f"{region}_ttbar_scaleup"] = all_histograms[120j::hist.rebin(2), 
+                                                              120j::hist.rebin(2), 
+                                                              region, 
+                                                              "ttbar", 
+                                                              "scaleup"].project("observable")
+            else:
+                f[f"{region}_ttbar_ME_var"] = all_histograms[120j::hist.rebin(2), 
+                                                             120j::hist.rebin(2), 
+                                                             region, 
+                                                             "ttbar", 
+                                                             "ME_var"].project("ml_observable")
+                f[f"{region}_ttbar_PS_var"] = all_histograms[120j::hist.rebin(2), 
+                                                             120j::hist.rebin(2), 
+                                                             region, 
+                                                             "ttbar", 
+                                                             "PS_var"].project("ml_observable")
+
+                f[f"{region}_ttbar_scaledown"] = all_histograms[120j::hist.rebin(2), 
+                                                                120j::hist.rebin(2), 
+                                                                region, 
+                                                                "ttbar", 
+                                                                "scaledown"].project("ml_observable")
+                f[f"{region}_ttbar_scaleup"] = all_histograms[120j::hist.rebin(2), 
+                                                              120j::hist.rebin(2), 
+                                                              region, 
+                                                              "ttbar", 
+                                                              "scaleup"].project("ml_observable")
 
             # W+jets scale
-            f[f"{region}_wjets_scale_var_down"] = all_histograms[120j :: hist.rebin(2), region, "wjets", "scale_var_down"]
-            f[f"{region}_wjets_scale_var_up"] = all_histograms[120j :: hist.rebin(2), region, "wjets", "scale_var_up"]
+            if not ml:
+                f[f"{region}_wjets_scale_var_down"] = all_histograms[120j::hist.rebin(2), 
+                                                                     120j::hist.rebin(2), 
+                                                                     region, 
+                                                                     "wjets", 
+                                                                     "scale_var_down"].project("observable")
+                f[f"{region}_wjets_scale_var_up"] = all_histograms[120j::hist.rebin(2), 
+                                                                   120j::hist.rebin(2), 
+                                                                   region, 
+                                                                   "wjets", 
+                                                                   "scale_var_up"].project("observable")
+            
+            else:
+                f[f"{region}_wjets_scale_var_down"] = all_histograms[120j::hist.rebin(2), 
+                                                                     120j::hist.rebin(2), 
+                                                                     region, 
+                                                                     "wjets", 
+                                                                     "scale_var_down"].project("ml_observable")
+                f[f"{region}_wjets_scale_var_up"] = all_histograms[120j::hist.rebin(2), 
+                                                                   120j::hist.rebin(2), 
+                                                                   region, 
+                                                                   "wjets", 
+                                                                   "scale_var_up"].project("ml_observable")
             
 def get_permutations_dict(MAX_N_JETS, include_labels=False, include_eval_mat=False):
     
@@ -216,3 +316,70 @@ def initialize_mlflow():
     mlflow.set_tracking_uri('https://mlflow.software-dev.ncsa.cloud') 
     mlflow.set_experiment("agc-demo")
     
+    
+import particle
+from anytree import NodeMixin, RenderTree, Node
+
+class GenPartNode(NodeMixin):
+    def __init__(self, name, genPart, parent=None, children=None):
+        super(GenPartNode, self).__init__()
+        self.name = name
+        self.genPart = genPart
+        self.parent = parent
+        if children:
+            self.children = children
+
+def printTrees(particles):
+    
+    origins = []
+    for genpart in particles:
+        if genpart.genPartIdxMother==-1:
+            
+            # create origin node
+            origin = GenPartNode(particle.Particle.from_pdgid(genpart.pdgId).name, genpart)
+            origins.append(origin)
+
+            # initialize lists/queues to keep track
+            queue_node = []
+            visited_genpart = []
+            queue_genpart = []
+
+            # add origin particle/node to queue/visited
+            queue_node.append(origin)
+            visited_genpart.append((genpart.pdgId,genpart.pt,genpart.eta,genpart.phi))
+            queue_genpart.append(genpart)
+            
+            # loop through queue
+            while queue_genpart:
+            
+                # grab top elements from queue
+                g = queue_genpart.pop(0)
+                n = queue_node.pop(0)
+
+                # iterate through daughters
+                for daughter in g.children:
+
+                    # (should be) unique id for particle
+                    daughter_tuple = (daughter.pdgId,daughter.pt,daughter.eta,daughter.phi)
+
+                    # if we have not visited particle yet
+                    if daughter_tuple not in visited_genpart:
+                        
+                        # add to queue
+                        visited_genpart.append(daughter_tuple)
+                        queue_genpart.append(daughter)
+
+                        # create new node
+                        node =  GenPartNode(particle.Particle.from_pdgid(daughter.pdgId).name, 
+                                            daughter,
+                                            parent = n)
+                        
+                        queue_node.append(node)
+                                
+        
+    # printing trees
+    for origin in origins:
+        for pre, fill, node in RenderTree(origin):
+            print("%s%s" % (pre, node.name))
+            
+    return

@@ -78,13 +78,13 @@ This work was supported by the U.S. National Science Foundation (NSF) cooperativ
 
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 4
    :titlesonly:
    :caption: About AGC
    :glob:
 
    about-agc/taskbackground
-   TestNotebook
+   about-agc/TestNotebook
    
 
 

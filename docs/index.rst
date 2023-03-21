@@ -84,12 +84,6 @@ This work was supported by the U.S. National Science Foundation (NSF) cooperativ
    :glob:
 
    about-agc/taskbackground
-   
-.. toctree::
-   :maxdepth: 2
-   :caption: CMS Open Data :math:`t\bar{t}` Measurement
-   :glob:
-
    ../analyses/cms-open-data-ttbar/ttbar_analysis_pipeline
    
 

@@ -122,6 +122,7 @@ six==1.16.0
 sortedcontainers==2.4.0
 soupsieve==2.3.2.post1
 stack-data==0.3.0
+sphinx-book-theme==1.0.0
 tabulate==0.8.10
 tblib==1.7.0
 terminado==0.15.0

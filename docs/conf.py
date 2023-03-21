@@ -57,7 +57,7 @@ html_static_path: list[str] = []
 
 # -- Options for Notebook input ----------------------------------------------
 
-html_logo = "docs/pipeline.png"
+html_logo = "pipeline.png"
 html_title = f"Analysis Grand Challenge {version}"
 
 nbsphinx_execute = "auto"  # auto, never

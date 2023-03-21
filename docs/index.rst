@@ -26,9 +26,9 @@ The AGC has two major pieces:
 #. **specification of a physics analysis** using Open Data which captures relevant workflow aspects encountered in physics analyses performed at the LHC,
 #. a **reference implementation** demonstrating the successful execution of this physics analysis at scale.
 
-The physics analysis task is a :math:`t\bar{t}` cross-section measurement with 2015 CMS Open Data (see `datasets/cms-open-data-2015`).
-The current reference implementation can be found in `analyses/cms-open-data-ttbar`.
-In addition to this, `analyses/atlas-open-data-hzz` contains a smaller scale :math:`H\rightarrow ZZ^*` analysis based on ATLAS Open Data.
+The physics analysis task is a :math:`t\bar{t}` cross-section measurement with 2015 CMS Open Data (see `datasets/cms-open-data-2015 <https://github.com/iris-hep/analysis-grand-challenge/tree/main/datasets/cms-open-data-2015>`_).
+The current reference implementation can be found in `analyses/cms-open-data-ttbar <https://github.com/iris-hep/analysis-grand-challenge/tree/main/analyses/cms-open-data-ttbar>`_.
+In addition to this, `analyses/atlas-open-data-hzz <https://github.com/iris-hep/analysis-grand-challenge/tree/main/analyses/atlas-open-data-hzz>`_ contains a smaller scale :math:`H\rightarrow ZZ^*` analysis based on ATLAS Open Data.
 
 See `this talk given at ICHEP 2022 <https://agenda.infn.it/event/28874/contributions/169204/attachments/94615/129603/20220709_AGC_ICHEP.pdf>`_ for some more information about the AGC.
 Additional information is available in two workshops focused on the AGC:
@@ -84,6 +84,12 @@ This work was supported by the U.S. National Science Foundation (NSF) cooperativ
    :glob:
 
    about-agc/taskbackground
+   
+.. toctree::
+   :maxdepth: 2
+   :caption: CMS Open Data :math:`t\bar{t}` Measurement
+
+   ../analyses/cms-open-data-ttbar/ttbar_analysis_pipeline
    
 
 

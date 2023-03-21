@@ -1,5 +1,5 @@
 Task Background
 ============
 
-CMS ttbar Cross-Section Measurement
+CMS :math:`t\bar{t}` Cross-Section Measurement
 -----------------

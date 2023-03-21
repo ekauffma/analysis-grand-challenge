@@ -84,8 +84,6 @@ This work was supported by the U.S. National Science Foundation (NSF) cooperativ
    :glob:
 
    about-agc/taskbackground
-   about-agc/test
-   about-agc/TestNotebook
    
 
 

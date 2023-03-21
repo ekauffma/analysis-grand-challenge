@@ -1,5 +1,5 @@
 Task Background
 ============
 
-ttbar cross-section measurement
+CMS ttbar Cross-Section Measurement
 -----------------

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 project = "Analysis Grand Challenge"
 authors = ["Alexander Held", "Oksana Shadura", "Elliott Kauffman"]
-version = 0.1.0
+version = "0.1.0"
 
 # -- General configuration ---------------------------------------------------
 

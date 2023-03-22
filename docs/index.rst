@@ -3,7 +3,7 @@
    :alt: AGC Pipeline
    :align: center
 
-Welcome to the documentation for Analysis Grand Challenge!
+Analysis Grand Challenge Documentation
 ================================
 
 |Binder| |DOI|
@@ -84,6 +84,14 @@ This work was supported by the U.S. National Science Foundation (NSF) cooperativ
    :glob:
 
    about-agc/taskbackground
+   
+.. toctree::
+   :maxdepth: 4
+   :titlesonly:
+   :caption: CMS :math:`t\bar{t}` Analysis
+   :glob:
+
+   cms-open-data-ttbar/ttbar_analysis_pipeline
    
 
 

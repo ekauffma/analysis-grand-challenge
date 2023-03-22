@@ -31,4 +31,14 @@ The tree of the above event looks something like::
         │   └── c~
         └── b~
         
-In CMS data, we have reconstructed jets and leptons, but we do not know with 100\% efficiency which particles the jets come from. Thus to minimize the number of background events in our signal region, we need to make some cuts using the kinematic properties of these variables.
+In CMS data, we have reconstructed jets and leptons, but we do not know with 100\% efficiency which particles the jets come from. Thus to minimize the number of background events in our signal region, we need to make some cuts using the kinematic properties of these variables. In this version of AGC, in the signal region (4j2b SR), we make the following cuts:
+
+* Jet :math:`p_T \geq 25` GeV
+* Electron :math:`p_T \geq 25` GeV
+* Muon :math:`p_T \geq 25` GeV
+* Exactly one lepton per event
+* At least four jets per event
+* At least two b-tagged jets per event
+
+We also include a control region (4j1b CR) which has the same cuts as above, except that there is exactly one b-tagged jet per event.
+

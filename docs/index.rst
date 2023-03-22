@@ -84,14 +84,14 @@ This work was supported by the U.S. National Science Foundation (NSF) cooperativ
 
    cms-open-data-ttbar/ttbar_analysis_pipeline
    taskbackground
-   
+
 .. toctree::
    :maxdepth: 2
    :titlesonly:
    :caption: ATLAS AGC
    :glob:
 
-   atlas-open-data-hzz/hzz_analysis_pipeline
+   atlas-open-data-hzz/HZZ_analysis_pipeline
    
 
 

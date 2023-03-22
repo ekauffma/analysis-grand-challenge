@@ -1,4 +1,4 @@
-.. image:: pipeline.png
+.. image:: cms-open-data-ttbar/utils/ecosystem.png
    :width: 95%
    :alt: AGC Pipeline
    :align: center
@@ -76,22 +76,22 @@ Acknowledgements
 
 This work was supported by the U.S. National Science Foundation (NSF) cooperative agreement `OAC-1836650 (IRIS-HEP) <https://nsf.gov/awardsearch/showAward?AWD_ID=1836650>`_.
 
-
 .. toctree::
-   :maxdepth: 4
+   :maxdepth: 2
    :titlesonly:
-   :caption: About AGC
-   :glob:
-
-   about-agc/taskbackground
-   
-.. toctree::
-   :maxdepth: 4
-   :titlesonly:
-   :caption: CMS :math:`t\bar{t}` Analysis
+   :caption: CMS AGC
    :glob:
 
    cms-open-data-ttbar/ttbar_analysis_pipeline
+   taskbackground
+   
+.. toctree::
+   :maxdepth: 2
+   :titlesonly:
+   :caption: ATLAS AGC
+   :glob:
+
+   atlas-open-data-hzz/hzz_analysis_pipeline
    
 
 

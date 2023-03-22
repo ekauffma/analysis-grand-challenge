@@ -20,6 +20,11 @@ version = "0.1.0"
 extensions = [
     "myst_parser",
     "nbsphinx",
+    "sphinx.ext.autodoc",
+    "sphinx.ext.mathjax",
+    "sphinx.ext.napoleon",
+    "sphinx_copybutton",
+    "sphinxcontrib.programoutput",
              ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -43,11 +48,11 @@ html_theme = "sphinx_book_theme"
 
 # Config for the Sphinx book
 
-html_baseurl = "https://hist.readthedocs.io/en/latest/"
+html_baseurl = "https://analysis-grand-challenge-emk.readthedocs.io/en/latest/"
 
 html_theme_options = {
     "home_page_in_toc": True,
-    "repository_url": "https://github.com/scikit-hep/hist",
+    "repository_url": "https://github.com/ekauffma/analysis-grand-challenge-emk/tree/read-the-docs",
     "use_repository_button": True,
     "use_issues_button": True,
     "use_edit_page_button": True,

@@ -4,6 +4,7 @@ Task Background
 CMS :math:`t\bar{t}` Cross-Section Measurement
 -----------------
 The Analysis Grand Challenge aims to demonstrate the integration of different software components in a realistic physics analysis. The task chosen for CMS open data is a measurement of the :math:`t\bar{t}` (top-antitop quark pair production) crosssection  measurement using events with at least four jets and one lepton in the final state. This signature has two possibilities, depending on whether the lepton/neutrino pair originates from the top or antitop quark:
+
 .. image:: images/ttbar.png
   :width: 80%
   :alt: Diagram of a :math:`t\bar{t}` event with four jets and one lepton.

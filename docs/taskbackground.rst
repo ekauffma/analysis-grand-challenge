@@ -1,7 +1,7 @@
-Task Background
+Physics Analysis Background
 ============
 
-CMS :math:`t\bar{t}` Cross-Section Measurement
+:math:`t\bar{t}` Events
 -----------------
 The Analysis Grand Challenge aims to demonstrate the integration of different software components in a realistic physics analysis. The task chosen for CMS open data is a measurement of the :math:`t\bar{t}` (top-antitop quark pair production) crosssection  measurement using events with at least four jets and one lepton in the final state. This signature has two possibilities, depending on whether the lepton/neutrino pair originates from the top or antitop quark:
 
@@ -31,6 +31,9 @@ The tree of the above event looks something like::
         │   └── c~
         └── b~
         
+Regions and Cuts
+-----------------
+
 In CMS data, we have reconstructed jets and leptons, but we do not know with 100\% efficiency which particles the jets come from. Thus to minimize the number of background events in our signal region, we need to make some cuts using the kinematic properties of these variables. In this version of AGC, in the signal region (4j2b SR), we make the following cuts:
 
 * Jet :math:`p_T \geq 25` GeV
@@ -42,3 +45,5 @@ In CMS data, we have reconstructed jets and leptons, but we do not know with 100
 
 We also include a control region (4j1b CR) which has the same cuts as above, except that there is exactly one b-tagged jet per event.
 
+Model Fitting
+-----------------

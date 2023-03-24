@@ -102,7 +102,7 @@ logging.getLogger("cabinetry").setLevel(logging.INFO)
 ### GLOBAL CONFIGURATION
 
 # input files per process, set to e.g. 10 (smaller number = faster)
-N_FILES_MAX_PER_SAMPLE = 5
+N_FILES_MAX_PER_SAMPLE = 1
 
 # enable Dask (currently will not work with Triton inference)
 USE_DASK = True
@@ -143,13 +143,16 @@ MAX_N_JETS = 6
 # whether to use NVIDIA Triton for inference (uses xgboost otherwise)
 USE_TRITON = False
 
-XGBOOST_MODEL_PATH = "models/testmodel_0.model"
+# path to local models (no triton)
+XGBOOST_MODEL_PATH_EVEN = "models/model_230324_even.model"
+XGBOOST_MODEL_PATH_ODD = "models/model_230324_odd.model"
 
 # name of model loaded in triton server
 MODEL_NAME = "reconstruction_bdt_xgb"
 
-# version of triton model to use
-MODEL_VERSION = "1"
+# versions of triton model to use
+MODEL_VERSION_EVEN = "1"
+MODEL_VERSION_ODD = "2"
 
 # URL of triton server 
 TRITON_URL = "agc-triton-inference-server:8001"
@@ -195,7 +198,7 @@ def get_features(jets, electrons, muons, permutations_dict):
 
     feature_count = 0
     
-    # delta R between top1 and lepton
+    # delta R between top_lepton and lepton
     features[:,0] = ak.flatten(np.sqrt((leptons.eta - jets[perms[...,3]].eta)**2 + 
                                        (leptons.phi - jets[perms[...,3]].phi)**2)).to_numpy()
 
@@ -204,34 +207,34 @@ def get_features(jets, electrons, muons, permutations_dict):
     features[:,1] = ak.flatten(np.sqrt((jets[perms[...,0]].eta - jets[perms[...,1]].eta)**2 + 
                                        (jets[perms[...,0]].phi - jets[perms[...,1]].phi)**2)).to_numpy()
 
-    #delta R between W and top2
+    #delta R between W and top_hadron
     features[:,2] = ak.flatten(np.sqrt((jets[perms[...,0]].eta - jets[perms[...,2]].eta)**2 + 
                                        (jets[perms[...,0]].phi - jets[perms[...,2]].phi)**2)).to_numpy()
     features[:,3] = ak.flatten(np.sqrt((jets[perms[...,1]].eta - jets[perms[...,2]].eta)**2 + 
                                        (jets[perms[...,1]].phi - jets[perms[...,2]].phi)**2)).to_numpy()
 
-    # delta phi between top1 and lepton
+    # delta phi between top_lepton and lepton
     features[:,4] = ak.flatten(np.abs(leptons.phi - jets[perms[...,3]].phi)).to_numpy()
 
     # delta phi between the two W
     features[:,5] = ak.flatten(np.abs(jets[perms[...,0]].phi - jets[perms[...,1]].phi)).to_numpy()
 
-    # delta phi between W and top2
+    # delta phi between W and top_hadron
     features[:,6] = ak.flatten(np.abs(jets[perms[...,0]].phi - jets[perms[...,2]].phi)).to_numpy()
     features[:,7] = ak.flatten(np.abs(jets[perms[...,1]].phi - jets[perms[...,2]].phi)).to_numpy()
 
-    # combined mass of top1 and lepton
+    # combined mass of top_lepton and lepton
     features[:,8] = ak.flatten((leptons + jets[perms[...,3]]).mass).to_numpy()
 
     # combined mass of W
     features[:,9] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]]).mass).to_numpy()
 
-    # combined mass of W and top2
+    # combined mass of W and top_hadron
     features[:,10] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
                                  jets[perms[...,2]]).mass).to_numpy()
     
     feature_count+=1
-    # combined pT of W and top2
+    # combined pT of W and top_hadron
     features[:,11] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
                                  jets[perms[...,2]]).pt).to_numpy()
 
@@ -293,7 +296,10 @@ def jet_pt_resolution(pt):
 
 
 class TtbarAnalysis(processor.ProcessorABC):
-    def __init__(self, disable_processing, io_file_percent, use_triton, xgboost_model, model_name, model_vers, url, permutations_dict):
+    def __init__(self, disable_processing, io_file_percent, use_triton, xgboost_model_even, xgboost_model_odd, 
+                 model_name, model_vers_even, model_vers_odd, url, permutations_dict):
+        
+        # initialize histogram
         num_bins = 25
         bin_low = 50
         bin_high = 550
@@ -312,9 +318,11 @@ class TtbarAnalysis(processor.ProcessorABC):
         
         # for ML inference
         self.use_triton = use_triton
-        self.xgboost_model = xgboost_model
+        self.xgboost_model_even = xgboost_model_even
+        self.xgboost_model_odd = xgboost_model_odd
         self.model_name = model_name
-        self.model_vers = model_vers
+        self.model_vers_even = model_vers_even
+        self.model_vers_odd = model_vers_odd
         self.url = url
         self.permutations_dict = permutations_dict
 
@@ -415,6 +423,7 @@ class TtbarAnalysis(processor.ProcessorABC):
             selected_muons = events.Muon[(events.Muon.pt >25)]
             jet_filter = (events.Jet.pt * events[pt_var]) > 25
             selected_jets = events.Jet[jet_filter]
+            even = (events.event%2==0)
 
             # single lepton requirement
             event_filters = ((ak.count(selected_electrons.pt, axis=1) + ak.count(selected_muons.pt, axis=1)) == 1)
@@ -430,12 +439,15 @@ class TtbarAnalysis(processor.ProcessorABC):
             selected_electrons = selected_electrons[event_filters]
             selected_muons = selected_muons[event_filters]
             selected_jets = selected_jets[event_filters]
+            even = even[event_filters]
 
             for region in ["4j1b", "4j2b"]:
                 # further filtering: 4j1b CR with single b-tag, 4j2b SR with two or more tags
                 if region == "4j1b":
                     region_filter = ak.sum(selected_jets.btagCSVV2 >= B_TAG_THRESHOLD, axis=1) == 1
                     selected_jets_region = selected_jets[region_filter]
+                    even_region = even[region_filter]
+                    
                     # use HT (scalar sum of jet pT) as observable
                     pt_var_modifier = (
                         events[event_filters][region_filter][pt_var]
@@ -450,6 +462,7 @@ class TtbarAnalysis(processor.ProcessorABC):
                     selected_jets_region = selected_jets[region_filter]
                     selected_electrons_region = selected_electrons[region_filter]
                     selected_muons_region = selected_muons[region_filter]
+                    even_region = even[region_filter]
 
                     # reconstruct hadronic top as bjj system with largest pT
                     # the jet energy scale / resolution effect is not propagated to this observable at the moment
@@ -464,25 +477,47 @@ class TtbarAnalysis(processor.ProcessorABC):
                     # get ml features
                     features, perm_counts = get_features(selected_jets_region, selected_electrons_region, 
                                                          selected_muons_region, self.permutations_dict)
+                    even_perm = np.repeat(even_region, perm_counts)
                     power = PowerTransformer(method='yeo-johnson', standardize=True)
                     
                     #calculate ml observable
                     if self.use_triton:
-                        inpt = [grpcclient.InferInput(input_name, features.shape, dtype)]
-                        inpt[0].set_data_from_numpy(power.fit_transform(features))
+                        
+                        results = np.zeros(features.shape[0])
                         output = grpcclient.InferRequestedOutput(output_name)
-                        results = triton_client.infer(model_name=self.model_name, 
-                                                      inputs=inpt, 
-                                                      outputs=[output]).as_numpy(output_name)
+                        
+                        inpt = [grpcclient.InferInput(input_name, features[even_perm].shape, dtype)]
+                        inpt[0].set_data_from_numpy(power.fit_transform(features[even_perm]))
+                        results[even_region]=triton_client.infer(
+                            model_name=self.model_name, 
+                            model_version=self.model_version_even,
+                            inputs=inpt, 
+                            outputs=[output]
+                        ).as_numpy(output_name)[:, 1]
+                        
+                        inpt = [grpcclient.InferInput(input_name, features[np.invert(even_perm)].shape, dtype)]
+                        inpt[0].set_data_from_numpy(power.fit_transform(features[np.invert(even_perm)]))
+                        results[np.invert(even_region)]=triton_client.infer(
+                            model_name=self.model_name, 
+                            model_version=self.model_version_odd,
+                            inputs=inpt, 
+                            outputs=[output]
+                        ).as_numpy(output_name)[:, 1]
                     
                     else:
-                        results = self.xgboost_model.predict_proba(power.fit_transform(features))
                         
-                    results = ak.unflatten(results[:, 1], perm_counts)
+                        results = np.zeros(features.shape[0])
+                        results[even_perm] = self.xgboost_model_even.predict_proba(
+                            power.fit_transform(features[even_perm,:])
+                        )[:, 1]
+                        results[np.invert(even_perm)] = results_odd = self.xgboost_model_odd.predict_proba(
+                            power.fit_transform(features[np.invert(even_perm),:])
+                        )[:, 1]
+                        
+                    results = ak.unflatten(results, perm_counts)
                     which_combination = ak.argmax(results,axis=1)
                     features_unflattened = ak.unflatten(features, perm_counts)
                     ML_observable = ak.flatten(features_unflattened[ak.from_regular(which_combination[:, np.newaxis])])[...,10]
-                    # ML_observable = observable
                     
                 ### histogram filling
                 if pt_var == "pt_nominal":
@@ -638,24 +673,27 @@ else:
     
 filemeta = run.preprocess(fileset, treename=treename)  # pre-processing
 
-model = XGBClassifier()
-model.load_model(XGBOOST_MODEL_PATH)
+if not USE_TRITON:
+    model_even = XGBClassifier()
+    model_even.load_model(XGBOOST_MODEL_PATH_EVEN)
+    model_odd = XGBClassifier()
+    model_odd.load_model(XGBOOST_MODEL_PATH_ODD)
+    
+else:
+    model_even = None
+    model_odd = None
 
 t0 = time.monotonic()
 # processing
 all_histograms, metrics = run(fileset, treename, processor_instance=TtbarAnalysis(DISABLE_PROCESSING, IO_FILE_PERCENT, 
-                                                                                  USE_TRITON, model,
-                                                                                  MODEL_NAME, MODEL_VERSION, 
+                                                                                  USE_TRITON, model_even, model_odd,
+                                                                                  MODEL_NAME, MODEL_VERSION_EVEN, MODEL_VERSION_ODD, 
                                                                                   TRITON_URL, permutations_dict)) 
 exec_time = time.monotonic() - t0
 
 # all_histograms = all_histograms["hist"]
 
 print(f"\nexecution took {exec_time:.2f} seconds")
-
-# %%
-import pickle
-all_histograms = pickle.load(open("all_histograms_temp.p","rb"))
 
 # %%
 # track metrics
@@ -765,7 +803,8 @@ plt.show()
 # This also builds pseudo-data by combining events from the various simulation setups we have processed.
 
 # %%
-utils.save_histograms(all_histograms["hist"], fileset, "histograms.root", ml=False)
+utils.save_histograms(all_histograms["hist"], fileset, "histograms_noml.root", ml=False)
+utils.save_histograms(all_histograms["hist"], fileset, "histograms_ml.root", ml=True)
 
 # %% [markdown]
 # ### Statistical inference
@@ -774,6 +813,7 @@ utils.save_histograms(all_histograms["hist"], fileset, "histograms.root", ml=Fal
 # We will use `cabinetry` to combine all histograms into a `pyhf` workspace and fit the resulting statistical model to the pseudodata we built.
 
 # %%
+# no ml version
 config = cabinetry.configuration.load("cabinetry_config.yml")
 cabinetry.templates.collect(config)
 cabinetry.templates.postprocess(config)  # optional post-processing (e.g. smoothing)
@@ -818,6 +858,42 @@ figs[1]["figure"]
 
 # %% [markdown]
 # We can see very good post-fit agreement.
+
+# %%
+model_prediction_postfit = cabinetry.model_utils.prediction(model, fit_results=fit_results)
+figs = cabinetry.visualize.data_mc(model_prediction_postfit, data, close_figure=True)
+figs[0]["figure"]
+
+# %%
+figs[1]["figure"]
+
+# %%
+# ml version
+config = cabinetry.configuration.load("cabinetry_config_ml.yml")
+cabinetry.templates.collect(config)
+cabinetry.templates.postprocess(config)  # optional post-processing (e.g. smoothing)
+ws = cabinetry.workspace.build(config)
+cabinetry.workspace.save(ws, "workspace.json")
+
+# %%
+model, data = cabinetry.model_utils.model_and_data(ws)
+fit_results = cabinetry.fit.fit(model, data)
+
+cabinetry.visualize.pulls(
+    fit_results, exclude="ttbar_norm", close_figure=True, save_figure=False
+)
+
+# %%
+poi_index = model.config.poi_index
+print(f"\nfit result for ttbar_norm: {fit_results.bestfit[poi_index]:.3f} +/- {fit_results.uncertainty[poi_index]:.3f}")
+
+# %%
+model_prediction = cabinetry.model_utils.prediction(model)
+figs = cabinetry.visualize.data_mc(model_prediction, data, close_figure=True)
+figs[0]["figure"]
+
+# %%
+figs[1]["figure"]
 
 # %%
 model_prediction_postfit = cabinetry.model_utils.prediction(model, fit_results=fit_results)

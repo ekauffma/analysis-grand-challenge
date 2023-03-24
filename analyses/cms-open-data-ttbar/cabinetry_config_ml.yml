@@ -2,7 +2,7 @@ General:
   Measurement: "CMS_ttbar"
   POI: "ttbar_norm"
   HistogramFolder: "histograms/"
-  InputPath: "histograms_noml.root:{RegionPath}_{SamplePath}{VariationPath}"
+  InputPath: "histograms_ml.root:{RegionPath}_{SamplePath}{VariationPath}"
   VariationPath: ""
 
 Regions:

@@ -177,7 +177,7 @@ def training_filter(jets, electrons, muons, genparts, even):
 
     # get labels from parent pdgId (fill none with 100 to filter out events with those jets)
     labels = np.abs(ak.fill_none(parent_pdgid,100).to_numpy())
-    labels[has_both_cousins] = -6 # assign jets with both cousins as top1 (not necessarily antiparticle)
+    labels[has_both_cousins] = -6 # assign jets with both cousins as top_lepton (not necessarily antiparticle)
 
     training_event_filter = (np.sum(labels,axis=1)==48) # events with a label sum of 48 have the correct particles
             
@@ -221,7 +221,7 @@ def get_training_set(jets, electrons, muons, labels, permutations_dict, labels_d
 
     feature_count = 0
     
-    # delta R between top1 and lepton
+    # delta R between top_lepton and lepton
     features[:,0] = ak.flatten(np.sqrt((leptons.eta - jets[perms[...,3]].eta)**2 + 
                                        (leptons.phi - jets[perms[...,3]].phi)**2)).to_numpy()
 
@@ -230,34 +230,34 @@ def get_training_set(jets, electrons, muons, labels, permutations_dict, labels_d
     features[:,1] = ak.flatten(np.sqrt((jets[perms[...,0]].eta - jets[perms[...,1]].eta)**2 + 
                                        (jets[perms[...,0]].phi - jets[perms[...,1]].phi)**2)).to_numpy()
 
-    #delta R between W and top2
+    #delta R between W and top_hadron
     features[:,2] = ak.flatten(np.sqrt((jets[perms[...,0]].eta - jets[perms[...,2]].eta)**2 + 
                                        (jets[perms[...,0]].phi - jets[perms[...,2]].phi)**2)).to_numpy()
     features[:,3] = ak.flatten(np.sqrt((jets[perms[...,1]].eta - jets[perms[...,2]].eta)**2 + 
                                        (jets[perms[...,1]].phi - jets[perms[...,2]].phi)**2)).to_numpy()
 
-    # delta phi between top1 and lepton
+    # delta phi between top_lepton and lepton
     features[:,4] = ak.flatten(np.abs(leptons.phi - jets[perms[...,3]].phi)).to_numpy()
 
     # delta phi between the two W
     features[:,5] = ak.flatten(np.abs(jets[perms[...,0]].phi - jets[perms[...,1]].phi)).to_numpy()
 
-    # delta phi between W and top2
+    # delta phi between W and top_hadron
     features[:,6] = ak.flatten(np.abs(jets[perms[...,0]].phi - jets[perms[...,2]].phi)).to_numpy()
     features[:,7] = ak.flatten(np.abs(jets[perms[...,1]].phi - jets[perms[...,2]].phi)).to_numpy()
 
-    # combined mass of top1 and lepton
+    # combined mass of top_lepton and lepton
     features[:,8] = ak.flatten((leptons + jets[perms[...,3]]).mass).to_numpy()
 
     # combined mass of W
     features[:,9] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]]).mass).to_numpy()
 
-    # combined mass of W and top2
+    # combined mass of W and top_hadron
     features[:,10] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
                                  jets[perms[...,2]]).mass).to_numpy()
     
     feature_count+=1
-    # combined pT of W and top2
+    # combined pT of W and top_hadron
     features[:,11] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
                                  jets[perms[...,2]]).pt).to_numpy()
 
@@ -522,28 +522,28 @@ legend_list = ["All Matches Correct", "Some Matches Correct", "No Matches Correc
 h = hist.Hist(
     hist.axis.Regular(deltar_numbins, deltar_low, deltar_high, name="deltar", label="$\Delta R$", flow=False),
     hist.axis.StrCategory(legend_list, name="truthlabel", label="Truth Label"),
-    hist.axis.StrCategory(["top1_lepton","W_W","top2_W"], name="category", label="Category"),
+    hist.axis.StrCategory(["toplep_lepton","W_W","tophad_W"], name="category", label="Category"),
 )
 
 # fill histogram
-h.fill(deltar = all_correct[:,0], category="top1_lepton", truthlabel="All Matches Correct")
-h.fill(deltar = some_correct[:,0], category="top1_lepton", truthlabel="Some Matches Correct")
-h.fill(deltar = none_correct[:,0], category="top1_lepton", truthlabel="No Matches Correct")
+h.fill(deltar = all_correct[:,0], category="toplep_lepton", truthlabel="All Matches Correct")
+h.fill(deltar = some_correct[:,0], category="toplep_lepton", truthlabel="Some Matches Correct")
+h.fill(deltar = none_correct[:,0], category="toplep_lepton", truthlabel="No Matches Correct")
 h.fill(deltar = all_correct[:,1], category="W_W", truthlabel="All Matches Correct")
 h.fill(deltar = some_correct[:,1], category="W_W", truthlabel="Some Matches Correct")
 h.fill(deltar = none_correct[:,1], category="W_W", truthlabel="No Matches Correct")
-h.fill(deltar = all_correct[:,2], category="top2_W", truthlabel="All Matches Correct")
-h.fill(deltar = some_correct[:,2], category="top2_W", truthlabel="Some Matches Correct")
-h.fill(deltar = none_correct[:,2], category="top2_W", truthlabel="No Matches Correct")
-h.fill(deltar = all_correct[:,3], category="top2_W", truthlabel="All Matches Correct")
-h.fill(deltar = some_correct[:,3], category="top2_W", truthlabel="Some Matches Correct")
-h.fill(deltar = none_correct[:,3], category="top2_W", truthlabel="No Matches Correct")
+h.fill(deltar = all_correct[:,2], category="tophad_W", truthlabel="All Matches Correct")
+h.fill(deltar = some_correct[:,2], category="tophad_W", truthlabel="Some Matches Correct")
+h.fill(deltar = none_correct[:,2], category="tophad_W", truthlabel="No Matches Correct")
+h.fill(deltar = all_correct[:,3], category="tophad_W", truthlabel="All Matches Correct")
+h.fill(deltar = some_correct[:,3], category="tophad_W", truthlabel="Some Matches Correct")
+h.fill(deltar = none_correct[:,3], category="tophad_W", truthlabel="No Matches Correct")
 
 # make plots
 fig,ax = plt.subplots(1,1,figsize=(8,4))
-h[0j::hist.rebin(2), :, "top1_lepton"].plot(density=True, ax=ax)
+h[0j::hist.rebin(2), :, "toplep_lepton"].plot(density=True, ax=ax)
 ax.legend(legend_list)
-ax.set_title("$\Delta R$ between top1 jet and lepton")
+ax.set_title("$\Delta R$ between top_lepton jet and lepton")
 fig.show()
 
 fig,ax = plt.subplots(1,1,figsize=(8,4))
@@ -553,9 +553,9 @@ ax.set_title("$\Delta R$ between the two W jets")
 fig.show()
 
 fig,ax = plt.subplots(1,1,figsize=(8,4))
-h[0j::hist.rebin(2), :, "top2_W"].plot(density=True, ax=ax)
+h[0j::hist.rebin(2), :, "tophad_W"].plot(density=True, ax=ax)
 ax.legend(legend_list)
-ax.set_title("$\Delta R$ between W jet and top2 jet")
+ax.set_title("$\Delta R$ between W jet and top_hadron jet")
 fig.show()
 
 # %% tags=[]
@@ -571,28 +571,28 @@ legend_list = ["All Matches Correct", "Some Matches Correct", "No Matches Correc
 h = hist.Hist(
     hist.axis.Regular(deltaphi_numbins, deltaphi_low, deltaphi_high, name="deltaphi", label="$\Delta \phi$", flow=False),
     hist.axis.StrCategory(legend_list, name="truthlabel", label="Truth Label"),
-    hist.axis.StrCategory(["top1_lepton","W_W","top2_W"], name="category", label="Category"),
+    hist.axis.StrCategory(["toplep_lepton","W_W","tophad_W"], name="category", label="Category"),
 )
 
 # fill histogram
-h.fill(deltaphi = all_correct[:,4], category="top1_lepton", truthlabel="All Matches Correct")
-h.fill(deltaphi = some_correct[:,4], category="top1_lepton", truthlabel="Some Matches Correct")
-h.fill(deltaphi = none_correct[:,4], category="top1_lepton", truthlabel="No Matches Correct")
+h.fill(deltaphi = all_correct[:,4], category="toplep_lepton", truthlabel="All Matches Correct")
+h.fill(deltaphi = some_correct[:,4], category="toplep_lepton", truthlabel="Some Matches Correct")
+h.fill(deltaphi = none_correct[:,4], category="toplep_lepton", truthlabel="No Matches Correct")
 h.fill(deltaphi = all_correct[:,5], category="W_W", truthlabel="All Matches Correct")
 h.fill(deltaphi = some_correct[:,5], category="W_W", truthlabel="Some Matches Correct")
 h.fill(deltaphi = none_correct[:,5], category="W_W", truthlabel="No Matches Correct")
-h.fill(deltaphi = all_correct[:,6], category="top2_W", truthlabel="All Matches Correct")
-h.fill(deltaphi = some_correct[:,6], category="top2_W", truthlabel="Some Matches Correct")
-h.fill(deltaphi = none_correct[:,6], category="top2_W", truthlabel="No Matches Correct")
-h.fill(deltaphi = all_correct[:,7], category="top2_W", truthlabel="All Matches Correct")
-h.fill(deltaphi = some_correct[:,7], category="top2_W", truthlabel="Some Matches Correct")
-h.fill(deltaphi = none_correct[:,7], category="top2_W", truthlabel="No Matches Correct")
+h.fill(deltaphi = all_correct[:,6], category="tophad_W", truthlabel="All Matches Correct")
+h.fill(deltaphi = some_correct[:,6], category="tophad_W", truthlabel="Some Matches Correct")
+h.fill(deltaphi = none_correct[:,6], category="tophad_W", truthlabel="No Matches Correct")
+h.fill(deltaphi = all_correct[:,7], category="tophad_W", truthlabel="All Matches Correct")
+h.fill(deltaphi = some_correct[:,7], category="tophad_W", truthlabel="Some Matches Correct")
+h.fill(deltaphi = none_correct[:,7], category="tophad_W", truthlabel="No Matches Correct")
 
 # make plots
 fig,ax = plt.subplots(1,1,figsize=(8,4))
-h[0j::hist.rebin(2), :, "top1_lepton"].plot(density=True, ax=ax)
+h[0j::hist.rebin(2), :, "toplep_lepton"].plot(density=True, ax=ax)
 ax.legend(legend_list)
-ax.set_title("$\Delta \phi$ between top1 jet and lepton")
+ax.set_title("$\Delta \phi$ between top_lepton jet and lepton")
 fig.show()
 
 fig,ax = plt.subplots(1,1,figsize=(8,4))
@@ -602,9 +602,9 @@ ax.set_title("$\Delta \phi$ between the two W jets")
 fig.show()
 
 fig,ax = plt.subplots(1,1,figsize=(8,4))
-h[0j::hist.rebin(2), :, "top2_W"].plot(density=True, ax=ax)
+h[0j::hist.rebin(2), :, "tophad_W"].plot(density=True, ax=ax)
 ax.legend(legend_list)
-ax.set_title("$\Delta \phi$ between W jet and top2 jet")
+ax.set_title("$\Delta \phi$ between W jet and top_hadron jet")
 fig.show()
 
 # %% tags=[]
@@ -614,33 +614,32 @@ fig.show()
 combinedmass_low = 0.0
 combinedmass_high = 1500.0
 combinedmass_numbins = 200
-legend_list = ["All Matches Correct", "Some Matches Correct", "No Matches Correct", "Jet Triplet with Largest pT"]
+legend_list = ["All Matches Correct", "Some Matches Correct", "No Matches Correct"]
 
 # define histogram
 h = hist.Hist(
     hist.axis.Regular(combinedmass_numbins, combinedmass_low, combinedmass_high, 
                       name="combinedmass", label="Combined Mass [GeV]", flow=False),
     hist.axis.StrCategory(legend_list, name="truthlabel", label="Truth Label"),
-    hist.axis.StrCategory(["top1_lepton","W_W","top2_W_W"], name="category", label="Category"),
+    hist.axis.StrCategory(["toplep_lepton","W_W","tophad_W_W"], name="category", label="Category"),
 )
 
 # fill histogram
-h.fill(combinedmass = all_correct[:,8], category="top1_lepton", truthlabel="All Matches Correct")
-h.fill(combinedmass = some_correct[:,8], category="top1_lepton", truthlabel="Some Matches Correct")
-h.fill(combinedmass = none_correct[:,8], category="top1_lepton", truthlabel="No Matches Correct")
+h.fill(combinedmass = all_correct[:,8], category="toplep_lepton", truthlabel="All Matches Correct")
+h.fill(combinedmass = some_correct[:,8], category="toplep_lepton", truthlabel="Some Matches Correct")
+h.fill(combinedmass = none_correct[:,8], category="toplep_lepton", truthlabel="No Matches Correct")
 h.fill(combinedmass = all_correct[:,9], category="W_W", truthlabel="All Matches Correct")
 h.fill(combinedmass = some_correct[:,9], category="W_W", truthlabel="Some Matches Correct")
 h.fill(combinedmass = none_correct[:,9], category="W_W", truthlabel="No Matches Correct")
-h.fill(combinedmass = all_correct[:,10], category="top2_W_W", truthlabel="All Matches Correct")
-h.fill(combinedmass = some_correct[:,10], category="top2_W_W", truthlabel="Some Matches Correct")
-h.fill(combinedmass = none_correct[:,10], category="top2_W_W", truthlabel="No Matches Correct")
-h.fill(combinedmass = observable, category="top2_W_W", truthlabel="Jet Triplet with Largest pT")
+h.fill(combinedmass = all_correct[:,10], category="tophad_W_W", truthlabel="All Matches Correct")
+h.fill(combinedmass = some_correct[:,10], category="tophad_W_W", truthlabel="Some Matches Correct")
+h.fill(combinedmass = none_correct[:,10], category="tophad_W_W", truthlabel="No Matches Correct")
 
 # make plots
 fig,ax = plt.subplots(1,1,figsize=(8,4))
-h[:, :, "top1_lepton"].plot(density=True, ax=ax)
+h[:, :, "toplep_lepton"].plot(density=True, ax=ax)
 ax.legend(legend_list[:-1])
-ax.set_title("Combined mass of top1 jet and lepton")
+ax.set_title("Combined mass of top_lepton jet and lepton")
 ax.set_xlim([0,400])
 fig.show()
 
@@ -652,9 +651,9 @@ ax.set_xlim([0,400])
 fig.show()
 
 fig,ax = plt.subplots(1,1,figsize=(8,4))
-h[:, :, "top2_W_W"].plot(density=True, ax=ax)
+h[:, :, "tophad_W_W"].plot(density=True, ax=ax)
 ax.legend(legend_list)
-ax.set_title("Combined mass of W jets and top2 jet")
+ax.set_title("Combined mass of W jets and top_hadron jet")
 ax.set_xlim([0,600])
 fig.show()
 
@@ -683,7 +682,7 @@ h.fill(pt = none_correct[:,11], truthlabel="No Matches Correct")
 fig,ax = plt.subplots(1,1,figsize=(8,4))
 h.plot(density=True, ax=ax)
 ax.legend(legend_list)
-ax.set_title("Combined pT of W jets and top2 jet")
+ax.set_title("Combined pT of W jets and top_hadron jet")
 ax.set_xlim([0,600])
 fig.show()
 
@@ -701,7 +700,7 @@ h = hist.Hist(
     hist.axis.Regular(pt_numbins, pt_low, pt_high, 
                       name="jetpt", label="Jet $p_T$ [GeV]", flow=False),
     hist.axis.StrCategory(legend_list, name="truthlabel", label="Truth Label"),
-    hist.axis.StrCategory(["W","top1","top2"], name="category", label="Category"),
+    hist.axis.StrCategory(["W","toplep","tophad"], name="category", label="Category"),
 )
 
 # fill histogram
@@ -711,12 +710,12 @@ h.fill(jetpt = none_correct[:,12], category="W", truthlabel="No Matches Correct"
 h.fill(jetpt = all_correct[:,13], category="W", truthlabel="All Matches Correct")
 h.fill(jetpt = some_correct[:,13], category="W", truthlabel="Some Matches Correct")
 h.fill(jetpt = none_correct[:,13], category="W", truthlabel="No Matches Correct")
-h.fill(jetpt = all_correct[:,14], category="top2", truthlabel="All Matches Correct")
-h.fill(jetpt = some_correct[:,14], category="top2", truthlabel="Some Matches Correct")
-h.fill(jetpt = none_correct[:,14], category="top2", truthlabel="No Matches Correct")
-h.fill(jetpt = all_correct[:,15], category="top1", truthlabel="All Matches Correct")
-h.fill(jetpt = some_correct[:,15], category="top1", truthlabel="Some Matches Correct")
-h.fill(jetpt = none_correct[:,15], category="top1", truthlabel="No Matches Correct")
+h.fill(jetpt = all_correct[:,14], category="tophad", truthlabel="All Matches Correct")
+h.fill(jetpt = some_correct[:,14], category="tophad", truthlabel="Some Matches Correct")
+h.fill(jetpt = none_correct[:,14], category="tophad", truthlabel="No Matches Correct")
+h.fill(jetpt = all_correct[:,15], category="toplep", truthlabel="All Matches Correct")
+h.fill(jetpt = some_correct[:,15], category="toplep", truthlabel="Some Matches Correct")
+h.fill(jetpt = none_correct[:,15], category="toplep", truthlabel="No Matches Correct")
 
 # make plots
 fig,ax = plt.subplots(1,1,figsize=(8,4))
@@ -727,16 +726,16 @@ ax.set_xlim([25,300])
 fig.show()
 
 fig,ax = plt.subplots(1,1,figsize=(8,4))
-h[:, :, "top2"].plot(density=True, ax=ax)
+h[:, :, "tophad"].plot(density=True, ax=ax)
 ax.legend(legend_list)
-ax.set_title("top2 Jet $p_T$")
+ax.set_title("top_hadron Jet $p_T$")
 ax.set_xlim([25,300])
 fig.show()
 
 fig,ax = plt.subplots(1,1,figsize=(8,4))
-h[:, :, "top1"].plot(density=True, ax=ax)
+h[:, :, "toplep"].plot(density=True, ax=ax)
 ax.legend(legend_list)
-ax.set_title("top1 Jet $p_T$")
+ax.set_title("top_lepton Jet $p_T$")
 ax.set_xlim([25,200])
 fig.show()
 
@@ -754,7 +753,7 @@ h = hist.Hist(
     hist.axis.Regular(mass_numbins, mass_low, mass_high, 
                       name="jetmass", label="Jet Mass [GeV]", flow=False),
     hist.axis.StrCategory(legend_list, name="truthlabel", label="Truth Label"),
-    hist.axis.StrCategory(["W","top1","top2"], name="category", label="Category"),
+    hist.axis.StrCategory(["W","toplep","tophad"], name="category", label="Category"),
 )
 
 # fill histogram
@@ -764,12 +763,12 @@ h.fill(jetmass = none_correct[:,16], category="W", truthlabel="No Matches Correc
 h.fill(jetmass = all_correct[:,17], category="W", truthlabel="All Matches Correct")
 h.fill(jetmass = some_correct[:,17], category="W", truthlabel="Some Matches Correct")
 h.fill(jetmass = none_correct[:,17], category="W", truthlabel="No Matches Correct")
-h.fill(jetmass = all_correct[:,18], category="top2", truthlabel="All Matches Correct")
-h.fill(jetmass = some_correct[:,18], category="top2", truthlabel="Some Matches Correct")
-h.fill(jetmass = none_correct[:,18], category="top2", truthlabel="No Matches Correct")
-h.fill(jetmass = all_correct[:,19], category="top1", truthlabel="All Matches Correct")
-h.fill(jetmass = some_correct[:,19], category="top1", truthlabel="Some Matches Correct")
-h.fill(jetmass = none_correct[:,19], category="top1", truthlabel="No Matches Correct")
+h.fill(jetmass = all_correct[:,18], category="tophad", truthlabel="All Matches Correct")
+h.fill(jetmass = some_correct[:,18], category="tophad", truthlabel="Some Matches Correct")
+h.fill(jetmass = none_correct[:,18], category="tophad", truthlabel="No Matches Correct")
+h.fill(jetmass = all_correct[:,19], category="toplep", truthlabel="All Matches Correct")
+h.fill(jetmass = some_correct[:,19], category="toplep", truthlabel="Some Matches Correct")
+h.fill(jetmass = none_correct[:,19], category="toplep", truthlabel="No Matches Correct")
 
 # make plots
 fig,ax = plt.subplots(1,1,figsize=(8,4))
@@ -779,15 +778,15 @@ ax.set_title("W Jet Mass")
 # fig.show()
 
 fig,ax = plt.subplots(1,1,figsize=(8,4))
-h[:, :, "top2"].plot(density=True, ax=ax)
+h[:, :, "tophad"].plot(density=True, ax=ax)
 ax.legend(legend_list)
-ax.set_title("top2 Jet Mass")
+ax.set_title("top_hadron Jet Mass")
 fig.show()
 
 fig,ax = plt.subplots(1,1,figsize=(8,4))
-h[:, :, "top1"].plot(density=True, ax=ax)
+h[:, :, "toplep"].plot(density=True, ax=ax)
 ax.legend(legend_list)
-ax.set_title("top1 Jet Mass")
+ax.set_title("top_lepton Jet Mass")
 fig.show()
 
 # %%
@@ -804,7 +803,7 @@ h = hist.Hist(
     hist.axis.Regular(btag_numbins, btag_low, btag_high, 
                       name="btag", label="Jet btag", flow=False),
     hist.axis.StrCategory(legend_list, name="truthlabel", label="Truth Label"),
-    hist.axis.StrCategory(["W","top1","top2"], name="category", label="Category"),
+    hist.axis.StrCategory(["W","toplep","tophad"], name="category", label="Category"),
 )
 
 # fill histogram
@@ -814,12 +813,12 @@ h.fill(btag = none_correct[:,20], category="W", truthlabel="No Matches Correct")
 h.fill(btag = all_correct[:,21], category="W", truthlabel="All Matches Correct")
 h.fill(btag = some_correct[:,21], category="W", truthlabel="Some Matches Correct")
 h.fill(btag = none_correct[:,21], category="W", truthlabel="No Matches Correct")
-h.fill(btag = all_correct[:,22], category="top2", truthlabel="All Matches Correct")
-h.fill(btag = some_correct[:,22], category="top2", truthlabel="Some Matches Correct")
-h.fill(btag = none_correct[:,22], category="top2", truthlabel="No Matches Correct")
-h.fill(btag = all_correct[:,23], category="top1", truthlabel="All Matches Correct")
-h.fill(btag = some_correct[:,23], category="top1", truthlabel="Some Matches Correct")
-h.fill(btag = none_correct[:,23], category="top1", truthlabel="No Matches Correct")
+h.fill(btag = all_correct[:,22], category="tophad", truthlabel="All Matches Correct")
+h.fill(btag = some_correct[:,22], category="tophad", truthlabel="Some Matches Correct")
+h.fill(btag = none_correct[:,22], category="tophad", truthlabel="No Matches Correct")
+h.fill(btag = all_correct[:,23], category="toplep", truthlabel="All Matches Correct")
+h.fill(btag = some_correct[:,23], category="toplep", truthlabel="Some Matches Correct")
+h.fill(btag = none_correct[:,23], category="toplep", truthlabel="No Matches Correct")
 
 # make plots
 fig,ax = plt.subplots(1,1,figsize=(8,4))
@@ -829,15 +828,15 @@ ax.set_title("W Jet btag")
 fig.show()
 
 fig,ax = plt.subplots(1,1,figsize=(8,4))
-h[:, :, "top2"].plot(density=True, ax=ax)
+h[:, :, "tophad"].plot(density=True, ax=ax)
 ax.legend(legend_list)
-ax.set_title("top2 Jet btag")
+ax.set_title("top_hadron Jet btag")
 fig.show()
 
 fig,ax = plt.subplots(1,1,figsize=(8,4))
-h[:, :, "top1"].plot(density=True, ax=ax)
+h[:, :, "toplep"].plot(density=True, ax=ax)
 ax.legend(legend_list)
-ax.set_title("top1 Jet btag")
+ax.set_title("top_lepton Jet btag")
 fig.show()
 
 # %%
@@ -854,7 +853,7 @@ h = hist.Hist(
     hist.axis.Regular(qgl_numbins, qgl_low, qgl_high, 
                       name="qgl", label="Jet qgl", flow=False),
     hist.axis.StrCategory(legend_list, name="truthlabel", label="Truth Label"),
-    hist.axis.StrCategory(["W","top1","top2"], name="category", label="Category"),
+    hist.axis.StrCategory(["W","toplep","tophad"], name="category", label="Category"),
 )
 
 # fill histogram
@@ -864,12 +863,12 @@ h.fill(qgl = none_correct[:,24], category="W", truthlabel="No Matches Correct")
 h.fill(qgl = all_correct[:,25], category="W", truthlabel="All Matches Correct")
 h.fill(qgl = some_correct[:,25], category="W", truthlabel="Some Matches Correct")
 h.fill(qgl = none_correct[:,25], category="W", truthlabel="No Matches Correct")
-h.fill(qgl = all_correct[:,26], category="top2", truthlabel="All Matches Correct")
-h.fill(qgl = some_correct[:,26], category="top2", truthlabel="Some Matches Correct")
-h.fill(qgl = none_correct[:,26], category="top2", truthlabel="No Matches Correct")
-h.fill(qgl = all_correct[:,27], category="top1", truthlabel="All Matches Correct")
-h.fill(qgl = some_correct[:,27], category="top1", truthlabel="Some Matches Correct")
-h.fill(qgl = none_correct[:,27], category="top1", truthlabel="No Matches Correct")
+h.fill(qgl = all_correct[:,26], category="tophad", truthlabel="All Matches Correct")
+h.fill(qgl = some_correct[:,26], category="tophad", truthlabel="Some Matches Correct")
+h.fill(qgl = none_correct[:,26], category="tophad", truthlabel="No Matches Correct")
+h.fill(qgl = all_correct[:,27], category="toplep", truthlabel="All Matches Correct")
+h.fill(qgl = some_correct[:,27], category="toplep", truthlabel="Some Matches Correct")
+h.fill(qgl = none_correct[:,27], category="toplep", truthlabel="No Matches Correct")
 
 # make plots
 fig,ax = plt.subplots(1,1,figsize=(8,4))
@@ -879,15 +878,15 @@ ax.set_title("W Jet qgl")
 fig.show()
 
 fig,ax = plt.subplots(1,1,figsize=(8,4))
-h[:, :, "top2"].plot(density=True, ax=ax)
+h[:, :, "tophad"].plot(density=True, ax=ax)
 ax.legend(legend_list)
-ax.set_title("top2 Jet qgl")
+ax.set_title("top_hadron Jet qgl")
 fig.show()
 
 fig,ax = plt.subplots(1,1,figsize=(8,4))
-h[:, :, "top1"].plot(density=True, ax=ax)
+h[:, :, "toplep"].plot(density=True, ax=ax)
 ax.legend(legend_list)
-ax.set_title("top1 Jet qgl")
+ax.set_title("top_lepton Jet qgl")
 fig.show()
 
 # %% [markdown]

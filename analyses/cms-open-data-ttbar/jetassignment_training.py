@@ -6,11 +6,11 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.14.4
+#       jupytext_version: 1.14.1
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
-#     name: py3-preamble
+#     name: python3
 # ---
 
 # %% [markdown]
@@ -18,11 +18,12 @@
 #
 # This is the training notebook for the jet-parton assignment task. The goal is to associate the leading four jets in each event to their associated parent particles. We are trying to assign jets according to the labels in the diagram below:
 #
-# <img src="utils/ttbar.png" alt="ttbar_labels" width="500"/>
+# <img src="utils/ttbar_ml_labels.png" alt="ttbar_labels" width="500"/>
 #
-# top1 and top2 jets do not necessarily correspond to top/antitop, respectively. The top1 jet is defined as having a lepton/neutrino pair as cousins, where the top2 jet is defined as having two jets as cousins. The W jets are not distinguished from each other.
 #
-# The strategy for solving this problem is to train a boosted decision tree to find the correct assignments for each jet. Since we consider four jets per event with three unique labels (W, top1, and top2), there are twelve possible combinations of assignments:
+# <mark>top<sub>lepton</sub></mark> and <mark>top<sub>hadron</sub></mark> jets do not necessarily correspond to top/antitop, respectively. The <mark>top<sub>lepton</sub></mark> jet is defined as having a lepton/neutrino pair as cousins, where the <mark>top<sub>hadron</sub></mark> jet is defined as having two jets as cousins. The <mark>W</mark> jets are not distinguished from each other.
+#
+# The strategy for solving this problem is to train a boosted decision tree to find the correct assignments for each jet. Since we consider four jets per event with three unique labels (<mark>W</mark>, <mark>top<sub>lepton</sub></mark>, and <mark>top<sub>hadron</sub></mark>), there are twelve possible combinations of assignments:
 #
 # <img src="utils/jetcombinations.png" alt="jetcombinations" width="700"/>
 #
@@ -80,19 +81,19 @@ AF = "coffea_casa"
 ### MACHINE LEARNING OPTIONS
 
 # enable Dask (whether to use dask for hyperparameter optimization)
-USE_DASK_ML = False
+USE_DASK_ML = True
 
 # enable MLFlow logging (to store metrics and models of hyperparameter optimization trials)
-USE_MLFLOW = False
+USE_MLFLOW = True
 
 # enable MLFlow model logging/registering
-MODEL_LOGGING = False
+MODEL_LOGGING = True
 
 # number of folds for cross-validation
 N_FOLD = 5
 
 # number of trials (per model) for hyperparameter optimization. Total number of trials will be 2*N_TRIALS
-N_TRIALS = 3
+N_TRIALS = 5
 
 # name to use for saving model to triton server
 MODEL_NAME = "sigbkg_bdt"
@@ -935,16 +936,13 @@ features_even = power.fit_transform(features_even)
 features_odd = power.fit_transform(features_odd)
 
 # %%
-# # define environment variables locally
-# # %env MLFLOW_TRACKING_URI=https://mlflow.software-dev.ncsa.cloud
-# # %env MLFLOW_S3_ENDPOINT_URL=https://mlflow-minio-api.software-dev.ncsa.cloud
-# # %env AWS_ACCESS_KEY_ID=
-# # %env AWS_SECRET_ACCESS_KEY=
-
-# %%
 # set up trials
 if USE_MLFLOW:
-    mlflow.set_tracking_uri('https://mlflow.software-dev.ncsa.cloud') 
+    
+    os.environ['MLFLOW_TRACKING_TOKEN'] = "eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJ6eXdjRVdfd2hOSzBTMDJLS3Nxd0Q0cGNjTXJpc1BSUUJDcEo4T0o1Rm40In0.eyJleHAiOjE2Nzk2ODE3NDksImlhdCI6MTY3OTY0NTc1MywiYXV0aF90aW1lIjoxNjc5NjQ1NzQ5LCJqdGkiOiJjY2IxZDQ3NC1hY2E0LTRlNTgtYWEzNC02YzFkZDBhMDg1M2EiLCJpc3MiOiJodHRwczovL2tleWNsb2FrLnNvZnR3YXJlLWRldi5uY3NhLmlsbGlub2lzLmVkdS9yZWFsbXMvbWxmbG93IiwiYXVkIjpbIm1sZmxvdy1kZW1vIiwiYWNjb3VudCJdLCJzdWIiOiIyOTdhM2ExNS02Nzc0LTQ0NDItOGVjNy0zNzBlNmVhNzM2MWIiLCJ0eXAiOiJCZWFyZXIiLCJhenAiOiJtbGZsb3ctZGVtbyIsInNlc3Npb25fc3RhdGUiOiIyNzc1ZGRjMC0zZGI0LTQyMDgtOTA4MS04NTU3ZDY0MjllODUiLCJzY29wZSI6InByb2ZpbGUgZ3JvdXBzIGVtYWlsIiwic2lkIjoiMjc3NWRkYzAtM2RiNC00MjA4LTkwODEtODU1N2Q2NDI5ZTg1IiwiZW1haWxfdmVyaWZpZWQiOnRydWUsIm5hbWUiOiJFbGxpb3R0IEthdWZmbWFuIiwiZ3JvdXBzIjpbIi9ncnBfamlyYV91c2VycyIsIi9zZF9tbGZsb3ciLCIvYWxsX3VzZXJzIiwiL2ppcmEtdXNlcnMiLCIvYWxsX2hwY191c2VyX3NwbyIsIm9mZmxpbmVfYWNjZXNzIiwiZGVmYXVsdC1yb2xlcy1tbGZsb3ciLCJ1bWFfYXV0aG9yaXphdGlvbiJdLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJla2F1ZmZtYSIsImdpdmVuX25hbWUiOiJFbGxpb3R0IiwiZmFtaWx5X25hbWUiOiJLYXVmZm1hbiIsImVtYWlsIjoiZWxtYWthODcwMEBnbWFpbC5jb20ifQ.byWdbaHzbJj-MQxfvRc8wc7jqN_FEAA4eE2qCVKfbVuGtEhs4MxJCUrNEoc_z47TD4HZGLLVcaXFFN5NWUjlTSilDzFnPHqsIXpFcTiPC24oyU9wixkAq3jWmwO2cVJ6jzacxKYz1gU_0lqmxB2JVmM3vfC0HjZakePL6SKWAvlbuEeWVoYtdpGSvHMWvhBVdVN_26SvIr1_YWu2s2pV-Kf2Nmjch1MAWgcDamJGllkfIJlaHd2-V0KB4_DBVmHkoa96A-wjglunYHW_PjfgjeFHBhmREv8__mocsobDkxuLJ8PU5sKxVszPxjFxzBbv9GxtQw_7ZKn-FKHWv1TlxA"
+    os.environ['MLFLOW_TRACKING_URI'] = "https://mlflow-demo.software-dev.ncsa.illinois.edu"
+    
+    mlflow.set_tracking_uri('https://mlflow-demo.software-dev.ncsa.illinois.edu') 
     mlflow.set_experiment("optimize-reconstruction-bdt-00") # this will create the experiment if it does not yet exist
 
     # grab experiment
@@ -954,7 +952,7 @@ if USE_MLFLOW:
 
     # create runs ahead of time (avoids conflicts when parallelizing mlflow logging)
     run_id_list=[]
-    for n in range(N_TRIALS):
+    for n in range(N_TRIALS*2):
         run = MlflowClient().create_run(experiment_id=experiment_id, run_name=f"run-{n}")
         run_id_list.append(run.info.run_id)
 
@@ -987,9 +985,6 @@ for i in range(N_TRIALS):
     
 print("Example of Trial Parameters: ")
 samples_even[0]
-
-# %%
-len(samples_even)
 
 # %%
 if USE_MLFLOW:
@@ -1105,14 +1100,19 @@ def fit_model(params,
               N_FEATURES=28,
               mlflowclient=None,
               use_mlflow=False,
-              log_models=False): 
+              log_models=False,
+              verbose=False): 
                             
     if use_mlflow:
         
         run_id = params["run_id"]
         
+        if verbose: print("run_id = ", run_id)
+        
         for param_name, value in params.items():
             mlflowclient.log_param(run_id, param_name, value)
+            
+            if verbose: print(f"logged param: {param_name} = {value}")
             
     # remove parameters that are not used for XGBClassifier
     params_copy = params.copy()
@@ -1133,9 +1133,16 @@ def fit_model(params,
         for metric, value in result.items():
             if not metric=="model":
                 mlflowclient.log_metric(run_id, metric, np.average(value))
+                if verbose: print(f"logged metric: {metric} = {np.average(value)}")
 
         # manually end run
         mlflowclient.set_terminated(run_id)
+        
+        if log_models:
+            signature = infer_signature(features, result["model"].predict(features))
+            with mlflow.start_run(run_id=run_id, nested=True) as run:
+                mlflow.xgboost.log_model(result["model"], "model", signature=signature)
+            result.pop("model")
                 
     return {"score": np.average(result["test_jet_score"]),
             "full_result": result}
@@ -1145,13 +1152,11 @@ def fit_model(params,
 # function to provide necessary environment variables to workers
 def initialize_mlflow(): 
     
-    os.environ['MLFLOW_TRACKING_URI'] = "https://mlflow.software-dev.ncsa.cloud"
-    os.environ['MLFLOW_S3_ENDPOINT_URL'] = "https://mlflow-minio-api.software-dev.ncsa.cloud"
-    os.environ['AWS_ACCESS_KEY_ID'] = "bengal1"
-    os.environ['AWS_SECRET_ACCESS_KEY'] = "leftfoot1"
+    os.environ['MLFLOW_TRACKING_TOKEN'] = "eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJ6eXdjRVdfd2hOSzBTMDJLS3Nxd0Q0cGNjTXJpc1BSUUJDcEo4T0o1Rm40In0.eyJleHAiOjE2Nzk2ODE3NDksImlhdCI6MTY3OTY0NTc1MywiYXV0aF90aW1lIjoxNjc5NjQ1NzQ5LCJqdGkiOiJjY2IxZDQ3NC1hY2E0LTRlNTgtYWEzNC02YzFkZDBhMDg1M2EiLCJpc3MiOiJodHRwczovL2tleWNsb2FrLnNvZnR3YXJlLWRldi5uY3NhLmlsbGlub2lzLmVkdS9yZWFsbXMvbWxmbG93IiwiYXVkIjpbIm1sZmxvdy1kZW1vIiwiYWNjb3VudCJdLCJzdWIiOiIyOTdhM2ExNS02Nzc0LTQ0NDItOGVjNy0zNzBlNmVhNzM2MWIiLCJ0eXAiOiJCZWFyZXIiLCJhenAiOiJtbGZsb3ctZGVtbyIsInNlc3Npb25fc3RhdGUiOiIyNzc1ZGRjMC0zZGI0LTQyMDgtOTA4MS04NTU3ZDY0MjllODUiLCJzY29wZSI6InByb2ZpbGUgZ3JvdXBzIGVtYWlsIiwic2lkIjoiMjc3NWRkYzAtM2RiNC00MjA4LTkwODEtODU1N2Q2NDI5ZTg1IiwiZW1haWxfdmVyaWZpZWQiOnRydWUsIm5hbWUiOiJFbGxpb3R0IEthdWZmbWFuIiwiZ3JvdXBzIjpbIi9ncnBfamlyYV91c2VycyIsIi9zZF9tbGZsb3ciLCIvYWxsX3VzZXJzIiwiL2ppcmEtdXNlcnMiLCIvYWxsX2hwY191c2VyX3NwbyIsIm9mZmxpbmVfYWNjZXNzIiwiZGVmYXVsdC1yb2xlcy1tbGZsb3ciLCJ1bWFfYXV0aG9yaXphdGlvbiJdLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJla2F1ZmZtYSIsImdpdmVuX25hbWUiOiJFbGxpb3R0IiwiZmFtaWx5X25hbWUiOiJLYXVmZm1hbiIsImVtYWlsIjoiZWxtYWthODcwMEBnbWFpbC5jb20ifQ.byWdbaHzbJj-MQxfvRc8wc7jqN_FEAA4eE2qCVKfbVuGtEhs4MxJCUrNEoc_z47TD4HZGLLVcaXFFN5NWUjlTSilDzFnPHqsIXpFcTiPC24oyU9wixkAq3jWmwO2cVJ6jzacxKYz1gU_0lqmxB2JVmM3vfC0HjZakePL6SKWAvlbuEeWVoYtdpGSvHMWvhBVdVN_26SvIr1_YWu2s2pV-Kf2Nmjch1MAWgcDamJGllkfIJlaHd2-V0KB4_DBVmHkoa96A-wjglunYHW_PjfgjeFHBhmREv8__mocsobDkxuLJ8PU5sKxVszPxjFxzBbv9GxtQw_7ZKn-FKHWv1TlxA"
+    os.environ['MLFLOW_TRACKING_URI'] = "https://mlflow-demo.software-dev.ncsa.illinois.edu"
     
-    mlflow.set_tracking_uri('https://mlflow.software-dev.ncsa.cloud') 
-    mlflow.set_experiment("agc-training-demo")
+    mlflow.set_tracking_uri('https://mlflow-demo.software-dev.ncsa.illinois.edu') 
+    mlflow.set_experiment("optimize-reconstruction-bdt-00")
 
 
 # %% tags=[]
@@ -1165,8 +1170,8 @@ if USE_DASK_ML:
     
     futures = client.map(fit_model,
                          samples_even, 
-                         features=features_even, 
-                         labels=labels_even,
+                         features=features_even[:120000], 
+                         labels=labels_even[:120000],
                          evaluation_matrix=evaluation_matrix,
                          n_folds=N_FOLD,
                          N_FEATURES=N_FEATURES,
@@ -1185,8 +1190,8 @@ else:
         print(i)
         print(samples_even[i])
         res.append(fit_model(samples_even[i], 
-                             features=features_even,
-                             labels=labels_even, 
+                             features=features_even[:120000],
+                             labels=labels_even[:120000], 
                              evaluation_matrix=evaluation_matrix,
                              n_folds=N_FOLD,
                              N_FEATURES=N_FEATURES,
@@ -1205,11 +1210,18 @@ print("best_parameters_even = ")
 best_parameters_even
 
 # %%
-print(scores)
+if MODEL_LOGGING:
+    best_run_id = samples_even[np.argmax(scores)]["run_id"]
+    best_model_path = f'runs:/{best_run_id}/model'
+    best_model_even = mlflow.xgboost.load_model(best_model_path)
+    
+    # register best model in mlflow model repository
+    result = mlflow.register_model(best_model_path, "sig-bkg-bdt")
 
-# %%
-best_model_even = res[np.argmax(scores)]["full_result"]["model"]
-best_model_even.save_model("models/model_230323_even.model")
+else:
+    best_model_even = res[np.argmax(scores)]["full_result"]["model"]
+    
+best_model_even.save_model("models/model_230324_even.model")
 
 # %% tags=[]
 if USE_DASK_ML:
@@ -1220,8 +1232,8 @@ if USE_DASK_ML:
     
     futures = client.map(fit_model,
                          samples_odd, 
-                         features=features_odd, 
-                         labels=labels_odd,
+                         features=features_odd[:60000], 
+                         labels=labels_odd[:60000],
                          evaluation_matrix=evaluation_matrix,
                          n_folds=N_FOLD,
                          N_FEATURES=N_FEATURES,
@@ -1240,8 +1252,8 @@ else:
         print(i)
         print(samples_odd[i])
         res.append(fit_model(samples_odd[i], 
-                             features=features_odd,
-                             labels=labels_odd, 
+                             features=features_odd[:60000],
+                             labels=labels_odd[:60000], 
                              evaluation_matrix=evaluation_matrix,
                              n_folds=N_FOLD,
                              N_FEATURES=N_FEATURES,
@@ -1260,8 +1272,18 @@ print("best_parameters_odd = ")
 best_parameters_odd
 
 # %% tags=[]
-best_model_odd = res[np.argmax(scores)]["full_result"]["model"]
-best_model_odd.save_model("models/model_230323_odd.model")
+if MODEL_LOGGING:
+    best_run_id = samples_even[np.argmax(scores)]["run_id"]
+    best_model_path = f'runs:/{best_run_id}/model'
+    best_model_odd = mlflow.xgboost.load_model(best_model_path)
+    
+    # register best model in mlflow model repository
+    result = mlflow.register_model(best_model_path, "sig-bkg-bdt")
+
+else:
+    best_model_odd = res[np.argmax(scores)]["full_result"]["model"]
+    
+best_model_odd.save_model("models/model_230324_odd.model")
 
 # %% [markdown]
 # # Evaluation with Optimized Model

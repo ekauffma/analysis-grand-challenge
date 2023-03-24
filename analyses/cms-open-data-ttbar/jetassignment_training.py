@@ -6,11 +6,11 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.14.1
+#       jupytext_version: 1.14.4
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
-#     name: python3
+#     name: py3-preamble
 # ---
 
 # %% [markdown]
@@ -80,10 +80,10 @@ AF = "coffea_casa"
 ### MACHINE LEARNING OPTIONS
 
 # enable Dask (whether to use dask for hyperparameter optimization)
-USE_DASK_ML = True
+USE_DASK_ML = False
 
 # enable MLFlow logging (to store metrics and models of hyperparameter optimization trials)
-USE_MLFLOW = True
+USE_MLFLOW = False
 
 # enable MLFlow model logging/registering
 MODEL_LOGGING = False
@@ -92,7 +92,7 @@ MODEL_LOGGING = False
 N_FOLD = 5
 
 # number of trials (per model) for hyperparameter optimization. Total number of trials will be 2*N_TRIALS
-N_TRIALS = 10
+N_TRIALS = 3
 
 # name to use for saving model to triton server
 MODEL_NAME = "sigbkg_bdt"
@@ -971,22 +971,25 @@ sampler = ParameterSampler({'max_depth': np.arange(10,80,10,dtype=int),
                             random_state=2) 
 
 samples_even = list(sampler)
-# samples_odd = list(sampler)
+samples_odd = list(sampler)
 
 # add additional info to each trial
 for i in range(N_TRIALS):
     samples_even[i]['trial_num'] = i
     samples_even[i]['parity'] = 'even' # categorizes this trial as for even event numbers
     
-    # samples_odd[i]['trial_num'] = i
-    # samples_odd[i]['parity'] = 'odd' # categorizes this trial as for odd event numbers
+    samples_odd[i]['trial_num'] = i
+    samples_odd[i]['parity'] = 'odd' # categorizes this trial as for odd event numbers
     
     if USE_MLFLOW: 
         samples_even[i]['run_id'] = run_id_list[i]
-        # samples_odd[i]['run_id'] = run_id_list[i+N_TRIALS]
+        samples_odd[i]['run_id'] = run_id_list[i+N_TRIALS]
     
 print("Example of Trial Parameters: ")
 samples_even[0]
+
+# %%
+len(samples_even)
 
 # %%
 if USE_MLFLOW:
@@ -1099,7 +1102,7 @@ def fit_model(params,
               labels, 
               evaluation_matrix,
               n_folds,
-              N_FEATURES=20,
+              N_FEATURES=28,
               mlflowclient=None,
               use_mlflow=False,
               log_models=False): 
@@ -1153,7 +1156,6 @@ def initialize_mlflow():
 
 # %% tags=[]
 N_FOLD=2
-USE_DASK_ML=True
 
 if USE_DASK_ML:
     start_time = time.time() 
@@ -1183,14 +1185,14 @@ else:
         print(i)
         print(samples_even[i])
         res.append(fit_model(samples_even[i], 
-                           features=features_even,
-                           labels=labels_even, 
-                           evaluation_matrix=evaluation_matrix,
-                           n_folds=N_FOLD,
-                           N_FEATURES=N_FEATURES,
-                           mlflowclient=mlflowclient,
-                           use_mlflow=USE_MLFLOW,
-                           log_models=MODEL_LOGGING))
+                             features=features_even,
+                             labels=labels_even, 
+                             evaluation_matrix=evaluation_matrix,
+                             n_folds=N_FOLD,
+                             N_FEATURES=N_FEATURES,
+                             mlflowclient=mlflowclient,
+                             use_mlflow=USE_MLFLOW,
+                             log_models=MODEL_LOGGING))
         print(res[i])
     time_elapsed = time.time() - start_time
 
@@ -1206,14 +1208,8 @@ best_parameters_even
 print(scores)
 
 # %%
-# best_model_even = res[np.argmax(scores)]["full_result"]["model"]
-# best_model_even.save_model("models/model_xgb_230303_even5.model")
-
-# %%
-for i in range(len(samples_even)):
-
-    model = res[i]["full_result"]["model"]
-    model.save_model(f"models/testmodel_{i}.model")
+best_model_even = res[np.argmax(scores)]["full_result"]["model"]
+best_model_even.save_model("models/model_230323_even.model")
 
 # %% tags=[]
 if USE_DASK_ML:
@@ -1224,8 +1220,8 @@ if USE_DASK_ML:
     
     futures = client.map(fit_model,
                          samples_odd, 
-                         features=features_odd[:N_EVENTS_TRAIN*12], 
-                         labels=labels_odd[:N_EVENTS_TRAIN*12],
+                         features=features_odd, 
+                         labels=labels_odd,
                          evaluation_matrix=evaluation_matrix,
                          n_folds=N_FOLD,
                          N_FEATURES=N_FEATURES,
@@ -1238,17 +1234,21 @@ if USE_DASK_ML:
     
 else:
     start_time = time.time() 
-    res = np.zeros(len(samples_odd))
+    res = []
     for i in range(len(samples_odd)):
-        res[i] = fit_model(samples_odd[i], 
-                           features=features_odd[:N_EVENTS_TRAIN*12],
-                           labels=labels_odd[:N_EVENTS_TRAIN*12], 
-                           evaluation_matrix=evaluation_matrix,
-                           n_folds=N_FOLD,
-                           N_FEATURES=N_FEATURES,
-                           mlflowclient=mlflowclient,
-                           use_mlflow=USE_MLFLOW,
-                           model_logging=MODEL_LOGGING)
+        print("_____________________________________________________________")
+        print(i)
+        print(samples_odd[i])
+        res.append(fit_model(samples_odd[i], 
+                             features=features_odd,
+                             labels=labels_odd, 
+                             evaluation_matrix=evaluation_matrix,
+                             n_folds=N_FOLD,
+                             N_FEATURES=N_FEATURES,
+                             mlflowclient=mlflowclient,
+                             use_mlflow=USE_MLFLOW,
+                             log_models=MODEL_LOGGING))
+        print(res[i])
     time_elapsed = time.time() - start_time
 
 print("Hyperparameter optimization took time = ", time_elapsed)
@@ -1261,7 +1261,7 @@ best_parameters_odd
 
 # %% tags=[]
 best_model_odd = res[np.argmax(scores)]["full_result"]["model"]
-best_model_odd.save_model("models/model_xgb_230303_odd5.model")
+best_model_odd.save_model("models/model_230323_odd.model")
 
 # %% [markdown]
 # # Evaluation with Optimized Model
@@ -1273,7 +1273,7 @@ train_predicted_prob = best_model_even.predict_proba(features_even)[:, 1]
 val_predicted = best_model_even.predict(features_odd)
 val_predicted_prob = best_model_even.predict_proba(features_odd)[:, 1]
 
-# %% jupyter={"outputs_hidden": true} tags=[]
+# %% tags=[]
 train_accuracy = accuracy_score(labels_even, train_predicted).round(3)
 train_precision = precision_score(labels_even, train_predicted).round(3)
 train_recall = recall_score(labels_even, train_predicted).round(3)
@@ -1297,7 +1297,7 @@ print("Validation Recall = ", val_recall)
 print("Validation f1 = ", val_f1)
 print("Validation AUC = ", val_aucroc)
 
-# %% jupyter={"outputs_hidden": true} tags=[]
+# %% tags=[]
 val_predicted_prob = val_predicted_prob.reshape((int(len(val_predicted_prob)/12),12))
 val_predicted_combination = np.argmax(val_predicted_prob,axis=1)
     
@@ -1332,7 +1332,7 @@ train_predicted_prob = best_model_odd.predict_proba(features_odd)[:, 1]
 val_predicted = best_model_odd.predict(features_even)
 val_predicted_prob = best_model_odd.predict_proba(features_even)[:, 1]
 
-# %% jupyter={"outputs_hidden": true} tags=[]
+# %% tags=[]
 train_accuracy = accuracy_score(labels_odd, train_predicted).round(3)
 train_precision = precision_score(labels_odd, train_predicted).round(3)
 train_recall = recall_score(labels_odd, train_predicted).round(3)
@@ -1356,7 +1356,7 @@ print("Validation Recall = ", val_recall)
 print("Validation f1 = ", val_f1)
 print("Validation AUC = ", val_aucroc)
 
-# %% jupyter={"outputs_hidden": true} tags=[]
+# %% tags=[]
 val_predicted_prob = val_predicted_prob.reshape((int(len(val_predicted_prob)/12),12))
 val_predicted_combination = np.argmax(val_predicted_prob,axis=1)
     
@@ -1385,7 +1385,10 @@ score = sum(scores)/len(scores)
 print("Training Jet Score = ", score)
 
 # %% [markdown]
-# ### mbjj test
+# ### mbjj test (Compare BDT output to previous method)
+
+# %%
+output = pickle.load(open("output_temp4.p", "rb"))
 
 # %%
 # grab features and labels and convert to np array
@@ -1415,7 +1418,7 @@ combinedmass_low = 0.0
 combinedmass_high = 1500.0
 combinedmass_numbins = 200
 
-legendlist=["Truth","Jet Triplet with Largest pT"]
+legendlist=["Truth","Jet Triplet with Largest pT","BDT"]
 
 # define histogram
 h = hist.Hist(
@@ -1429,36 +1432,22 @@ h.fill(combinedmass = all_correct_top_mass, truthlabel="Truth")
 h.fill(combinedmass = observable_list, truthlabel="Jet Triplet with Largest pT")
 
 # %%
-for i in range(10):
+predictions = best_model_even.predict_proba(features_preprocessed)[:,0]
+predictions = predictions.reshape((int(len(predictions)/12),12))
+which_combination = np.argmin(predictions,axis=-1)
     
-    test_model = XGBClassifier()
-    test_model.load_model(f"models/testmodel_{i}.model")
-    
-    predictions = test_model.predict_proba(features_preprocessed)[:,0]
-    predictions = predictions.reshape((int(len(predictions)/12),12))
-    which_combination = np.argmin(predictions,axis=-1)
-    
-    top_mass = np.zeros(features_reshaped.shape[0])
-    for j in range(len(top_mass)):
-        top_mass[j] = top_mass_candidates[j,which_combination[j]]
+top_mass = np.zeros(features_reshaped.shape[0])
+for j in range(len(top_mass)):
+    top_mass[j] = top_mass_candidates[j,which_combination[j]]
         
-    plt.hist(observable_list,bins=np.linspace(0,1000,100),density=True,histtype='step')
-    plt.hist(all_correct_top_mass,bins=np.linspace(0,1000,100),density=True,histtype='step')
-    plt.hist(top_mass,bins=np.linspace(0,1000,100),density=True,histtype='step')
-    plt.legend(["Jet Triplet with Largest pT","Truth",f"BDT #{i}"])
-    plt.show()
-        
-    h.fill(combinedmass = top_mass, truthlabel=f"BDT #{i}")
-    legendlist.append(f"BDT #{i}")
+h.fill(combinedmass = top_mass, truthlabel="BDT")
 
 # %%
 fig,ax = plt.subplots(1,1,figsize=(8,8))
-h.plot(density=True, ax=ax)
+h.plot(ax=ax)
 ax.legend(legendlist)
 ax.set_title("Reconstructed Top Mass")
-ax.set_xlim([0,600])
+ax.set_xlim([80,400])
 fig.show()
-
-# %%
 
 # %%

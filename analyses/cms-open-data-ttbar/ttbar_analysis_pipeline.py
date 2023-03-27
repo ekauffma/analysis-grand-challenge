@@ -867,41 +867,39 @@ figs[0]["figure"]
 # %%
 figs[1]["figure"]
 
-# %%
-# ml version
-config = cabinetry.configuration.load("cabinetry_config_ml.yml")
-cabinetry.templates.collect(config)
-cabinetry.templates.postprocess(config)  # optional post-processing (e.g. smoothing)
-ws = cabinetry.workspace.build(config)
-cabinetry.workspace.save(ws, "workspace.json")
+# %% [markdown]
+# ### ML Validation
+# We used two methods to reconstruct the top mass: choosing the three-jet system with the highest $p_T$ and choosing the three jets based on the output from out boosted decision tree. We can further validate our results by applying the above fit to the ML variable and checking for good agreement.
 
 # %%
-model, data = cabinetry.model_utils.model_and_data(ws)
-fit_results = cabinetry.fit.fit(model, data)
-
-cabinetry.visualize.pulls(
-    fit_results, exclude="ttbar_norm", close_figure=True, save_figure=False
-)
-
-# %%
-poi_index = model.config.poi_index
-print(f"\nfit result for ttbar_norm: {fit_results.bestfit[poi_index]:.3f} +/- {fit_results.uncertainty[poi_index]:.3f}")
+# load the ml workspace (uses the ml observable instead of previous method)
+config_ml = cabinetry.configuration.load("cabinetry_config_ml.yml")
+cabinetry.templates.collect(config_ml)
+cabinetry.templates.postprocess(config_ml)  # optional post-processing (e.g. smoothing)
+ws_ml = cabinetry.workspace.build(config_ml)
+cabinetry.workspace.save(ws_ml, "workspace_ml.json")
 
 # %%
-model_prediction = cabinetry.model_utils.prediction(model)
-figs = cabinetry.visualize.data_mc(model_prediction, data, close_figure=True)
-figs[0]["figure"]
+model_ml, data_ml = cabinetry.model_utils.model_and_data(ws_ml)
+
+# %% [markdown]
+# Let's view the model obtained using the ML observable before the fit:
 
 # %%
+model_prediction = cabinetry.model_utils.prediction(model_ml)
+figs = cabinetry.visualize.data_mc(model_prediction, data_ml, close_figure=True)
 figs[1]["figure"]
 
-# %%
-model_prediction_postfit = cabinetry.model_utils.prediction(model, fit_results=fit_results)
-figs = cabinetry.visualize.data_mc(model_prediction_postfit, data, close_figure=True)
-figs[0]["figure"]
+# %% [markdown]
+# Now applying the fit results from the trijet combination observable to the ML observable, let's see whether we have good data-MC agreement:
 
 # %%
+model_prediction_postfit = cabinetry.model_utils.prediction(model_ml, fit_results=fit_results)
+figs = cabinetry.visualize.data_mc(model_prediction_postfit, data_ml, close_figure=True)
 figs[1]["figure"]
+
+# %% [markdown]
+# We still see very good post-fit agreement here.
 
 # %% [markdown]
 # ### What is next?

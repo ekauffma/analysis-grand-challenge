@@ -108,6 +108,9 @@ The values used for the cross-section of each process are included in the table 
      - scale from lepton filter to inclusive
    * - single_top_tW
      - 37.936 + 37.906
+     - 
+   * - wjets
+     - 61457 * 0.252
      - e/mu+nu final states
 
 

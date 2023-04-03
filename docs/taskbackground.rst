@@ -47,3 +47,5 @@ We also include a control region (4j1b CR) which has the same cuts as above, exc
 
 Model Fitting
 -----------------
+
+In order to measure the :math:`t\bar{t}` crosssection, we use a binned maximum likelihood fit. For the Monte Carlo data, we use five samples: :math:`t\bar{t}` (signal), W + jets, single top, s-channel, single top, t-channel, and single top quark W-associated production (tW). The latter four comprise the processes we would expect to see in the background. To demonstrate a fit to data, we build some pseudodata from the MC data.

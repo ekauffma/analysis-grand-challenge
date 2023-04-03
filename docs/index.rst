@@ -85,7 +85,6 @@ This work was supported by the U.S. National Science Foundation (NSF) cooperativ
    cms-open-data-ttbar/ttbar_analysis_pipeline
    versionsdescription
    taskbackground
-   datasets
    architecture
 
 .. toctree::

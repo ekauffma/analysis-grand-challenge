@@ -63,17 +63,25 @@ The datasets used for this AGC version are from the 2015 CMS Open Data release a
   * tZ / tWZ: potentially missing in inputs, not included in `/ST_*`
 
 * **W+jets**:
+
   * nominal (with 1l filter):
+  
     * `20546 <https://opendata.cern.ch/record/20546>`_: same as below, unclear if overlap
     * `20547 <https://opendata.cern.ch/record/20547>`_: aMC@NLO + Pythia 8 (ext2), 5601 files, 4.5 TB -> converted
     * `20548 <https://opendata.cern.ch/record/20548>`_: aMC@NLO + Pythia 8 (ext4), 4598 files, 3.8 TB -> converted
 
 * **data**:
+
   * single muon:
+  
     * `24119 <https://opendata.cern.ch/record/24119>`_: 1916 files, 1.4 TB -> converted
+  
   * single electron:
+    
     * `24120 <https://opendata.cern.ch/record/24120>`_: 2974 files, 2.6 TB -> converted
+  
   * validated runs:
+    
     * `24210 <https://opendata.cern.ch/record/24210>`_: single txt file
     
 More information about datasets can be found in `analysis-grand-challenge/datasets/cms-open-data-2015/`.
@@ -82,15 +90,25 @@ Cross-section values
 -----------------
 The values used for the cross-section of each process are included in the table below. These values were obtained from `https://atlas-groupdata.web.cern.ch/atlas-groupdata/dev/AnalysisTop/TopDataPreparation/XSection-MC15-13TeV.data <https://atlas-groupdata.web.cern.ch/atlas-groupdata/dev/AnalysisTop/TopDataPreparation/XSection-MC15-13TeV.data>`_.
 
-+-------------------+-------------------------+---------------------------------------------+
-| Process           | Crosssection (pb)       | Comments                                    |
-+===================+=========================+=============================================+
-| ttbar             | 396.87 + 332.97         | nonallhad + allhad, keep same x-sec for all |
-| single_top_s_chan | 2.0268 + 1.2676         | -                                           |
-| single_top_t_chan | (36.993 + 22.175)/0.252 | scale from lepton filter to inclusive       |
-| single_top_tW     | 37.936 + 37.906         | -                                           |
-| wjets             | 61457 * 0.252           | # e/mu+nu final states                      |
-+-------------------+-------------------------+---------------------------------------------+
+.. list-table:: Cross-section Values
+   :widths: 25 25 50
+   :header-rows: 1
+
+   * - Process
+     - Crosssection (pb)
+     - Comments
+   * - ttbar
+     - 396.87 + 332.97
+     - nonallhad + allhad, keep same x-sec for all
+   * - single_top_s_chan
+     - 2.0268 + 1.2676
+     - 
+   * - single_top_t_chan
+     - (36.993 + 22.175)/0.252
+     - scale from lepton filter to inclusive
+   * - single_top_tW
+     - 37.936 + 37.906
+     - e/mu+nu final states
 
 
 Cuts

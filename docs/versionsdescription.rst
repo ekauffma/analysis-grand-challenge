@@ -127,3 +127,16 @@ The cuts applied in this analysis are listed below:
 * Events must have at least one :math:`b`-tagged jet
 * **4j1b Region**: Events must have exactly one :math:`b`-tagged jet
 * **4j2b Region**: Events must have two or more :math:`b`-tagged jets
+
+
+Analysis Pipelines
+-----------------
+
+There are two options for analysis pipelines included in this version of AGC.
+
+.. image:: cms-open-data-ttbar/utils/processing_pipelines.png
+   :width: 95%
+   :alt: AGC Analysis Pipeline Options
+   :align: center
+   
+In the first option, enabled by setting `USE_SERVICEX=False`, pure coffea is used to process the data and accumulate the results into histograms. In the second option, enabled by setting `USE_SERVICEX=True`, ServiceX is first used to create cached datasets containing the necessary branches with the appropriate cuts. After this, coffea is used to further process the data and accumulate into histograms.

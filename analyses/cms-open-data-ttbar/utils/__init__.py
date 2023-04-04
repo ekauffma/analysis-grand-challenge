@@ -102,64 +102,43 @@ def save_histograms(all_histograms, fileset, filename, ml=False):
     pseudo_data = (all_histograms[:, :, :, "ttbar", "ME_var"] + all_histograms[:, :, :, "ttbar", "PS_var"]) / 2  + all_histograms[:, :, :, "wjets", "nominal"]
 
     with uproot.recreate(filename) as f:
-        for region in ["4j1b", "4j2b"]:
-            if not ml:
+        
+        region_list = ["4j1b", "4j2b"]
+        if ml:
+            region_list.append("4j2bML")
+        
+        for region in region_list:
+            if not region=="4j2bML":
                 f[f"{region}_pseudodata"] = pseudo_data[120j::hist.rebin(2), 
                                                         120j::hist.rebin(2), 
                                                         region].project("observable")
-            else:
-                f[f"{region}_pseudodata"] = pseudo_data[120j::hist.rebin(2), 
-                                                        120j::hist.rebin(2), 
-                                                        region].project("ml_observable")
-            for sample in nominal_samples:
-                sample_name = sample.split("__")[0]
-                if not ml:
+                for sample in nominal_samples:
+                    sample_name = sample.split("__")[0]
                     f[f"{region}_{sample_name}"] = all_histograms[120j::hist.rebin(2), 
                                                                   120j::hist.rebin(2), 
                                                                   region, 
                                                                   sample_name, 
                                                                   "nominal"].project("observable")
-                else:
-                    f[f"{region}_{sample_name}"] = all_histograms[120j::hist.rebin(2), 
-                                                                  120j::hist.rebin(2), 
-                                                                  region, 
-                                                                  sample_name, 
-                                                                  "nominal"].project("ml_observable")
-
-                # b-tagging variations
-                for i in range(4):
-                    for direction in ["up", "down"]:
-                        variation_name = f"btag_var_{i}_{direction}"
-                        if not ml:
+                
+                    # b-tagging variations
+                    for i in range(4):
+                        for direction in ["up", "down"]:
+                            variation_name = f"btag_var_{i}_{direction}"
                             f[f"{region}_{sample_name}_{variation_name}"] = all_histograms[120j::hist.rebin(2), 
                                                                                            120j::hist.rebin(2), 
                                                                                            region, 
                                                                                            sample_name, 
                                                                                            variation_name].project("observable")
-                        else:
-                            f[f"{region}_{sample_name}_{variation_name}"] = all_histograms[120j::hist.rebin(2), 
-                                                                                           120j::hist.rebin(2), 
-                                                                                           region, 
-                                                                                           sample_name, 
-                                                                                           variation_name].project("ml_observable")
 
-                # jet energy scale variations
-                for variation_name in ["pt_scale_up", "pt_res_up"]:
-                    if not ml:
+                    # jet energy scale variations
+                    for variation_name in ["pt_scale_up", "pt_res_up"]:
                         f[f"{region}_{sample_name}_{variation_name}"] = all_histograms[120j::hist.rebin(2), 
                                                                                        120j::hist.rebin(2), 
                                                                                        region, 
                                                                                        sample_name, 
                                                                                        variation_name].project("observable")
-                    else:
-                        f[f"{region}_{sample_name}_{variation_name}"] = all_histograms[120j::hist.rebin(2), 
-                                                                                       120j::hist.rebin(2), 
-                                                                                       region, 
-                                                                                       sample_name, 
-                                                                                       variation_name].project("ml_observable")
+                    
 
-            # ttbar modeling
-            if not ml:
                 f[f"{region}_ttbar_ME_var"] = all_histograms[120j::hist.rebin(2), 
                                                              120j::hist.rebin(2), 
                                                              region, 
@@ -181,31 +160,9 @@ def save_histograms(all_histograms, fileset, filename, ml=False):
                                                               region, 
                                                               "ttbar", 
                                                               "scaleup"].project("observable")
-            else:
-                f[f"{region}_ttbar_ME_var"] = all_histograms[120j::hist.rebin(2), 
-                                                             120j::hist.rebin(2), 
-                                                             region, 
-                                                             "ttbar", 
-                                                             "ME_var"].project("ml_observable")
-                f[f"{region}_ttbar_PS_var"] = all_histograms[120j::hist.rebin(2), 
-                                                             120j::hist.rebin(2), 
-                                                             region, 
-                                                             "ttbar", 
-                                                             "PS_var"].project("ml_observable")
+            
 
-                f[f"{region}_ttbar_scaledown"] = all_histograms[120j::hist.rebin(2), 
-                                                                120j::hist.rebin(2), 
-                                                                region, 
-                                                                "ttbar", 
-                                                                "scaledown"].project("ml_observable")
-                f[f"{region}_ttbar_scaleup"] = all_histograms[120j::hist.rebin(2), 
-                                                              120j::hist.rebin(2), 
-                                                              region, 
-                                                              "ttbar", 
-                                                              "scaleup"].project("ml_observable")
-
-            # W+jets scale
-            if not ml:
+                # W+jets scale
                 f[f"{region}_wjets_scale_var_down"] = all_histograms[120j::hist.rebin(2), 
                                                                      120j::hist.rebin(2), 
                                                                      region, 
@@ -216,18 +173,73 @@ def save_histograms(all_histograms, fileset, filename, ml=False):
                                                                    region, 
                                                                    "wjets", 
                                                                    "scale_var_up"].project("observable")
-            
+                
             else:
+                f[f"{region}_pseudodata"] = pseudo_data[120j::hist.rebin(2), 
+                                                        120j::hist.rebin(2), 
+                                                        "4j2b"].project("ml_observable")
+                for sample in nominal_samples:
+                    sample_name = sample.split("__")[0]
+                    f[f"{region}_{sample_name}"] = all_histograms[120j::hist.rebin(2), 
+                                                                  120j::hist.rebin(2), 
+                                                                  "4j2b", 
+                                                                  sample_name, 
+                                                                  "nominal"].project("ml_observable")
+                
+                    # b-tagging variations
+                    for i in range(4):
+                        for direction in ["up", "down"]:
+                            variation_name = f"btag_var_{i}_{direction}"
+                            f[f"{region}_{sample_name}_{variation_name}"] = all_histograms[120j::hist.rebin(2), 
+                                                                                           120j::hist.rebin(2), 
+                                                                                           "4j2b", 
+                                                                                           sample_name, 
+                                                                                           variation_name].project("ml_observable")
+
+                    # jet energy scale variations
+                    for variation_name in ["pt_scale_up", "pt_res_up"]:
+                        f[f"{region}_{sample_name}_{variation_name}"] = all_histograms[120j::hist.rebin(2), 
+                                                                                       120j::hist.rebin(2), 
+                                                                                       "4j2b", 
+                                                                                       sample_name, 
+                                                                                       variation_name].project("ml_observable")
+                    
+
+                f[f"{region}_ttbar_ME_var"] = all_histograms[120j::hist.rebin(2), 
+                                                             120j::hist.rebin(2), 
+                                                             "4j2b", 
+                                                             "ttbar", 
+                                                             "ME_var"].project("ml_observable")
+                f[f"{region}_ttbar_PS_var"] = all_histograms[120j::hist.rebin(2), 
+                                                             120j::hist.rebin(2), 
+                                                             "4j2b", 
+                                                             "ttbar", 
+                                                             "PS_var"].project("ml_observable")
+
+                f[f"{region}_ttbar_scaledown"] = all_histograms[120j::hist.rebin(2), 
+                                                                120j::hist.rebin(2), 
+                                                                "4j2b", 
+                                                                "ttbar", 
+                                                                "scaledown"].project("ml_observable")
+                f[f"{region}_ttbar_scaleup"] = all_histograms[120j::hist.rebin(2), 
+                                                              120j::hist.rebin(2), 
+                                                              "4j2b", 
+                                                              "ttbar", 
+                                                              "scaleup"].project("ml_observable")
+            
+
+                # W+jets scale
                 f[f"{region}_wjets_scale_var_down"] = all_histograms[120j::hist.rebin(2), 
                                                                      120j::hist.rebin(2), 
-                                                                     region, 
+                                                                     "4j2b", 
                                                                      "wjets", 
                                                                      "scale_var_down"].project("ml_observable")
                 f[f"{region}_wjets_scale_var_up"] = all_histograms[120j::hist.rebin(2), 
                                                                    120j::hist.rebin(2), 
-                                                                   region, 
+                                                                   "4j2b", 
                                                                    "wjets", 
                                                                    "scale_var_up"].project("ml_observable")
+            
             
 def get_permutations_dict(MAX_N_JETS, include_labels=False, include_eval_mat=False):
     

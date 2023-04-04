@@ -97,7 +97,7 @@ logging.getLogger("cabinetry").setLevel(logging.INFO)
 ### GLOBAL CONFIGURATION
 
 # input files per process, set to e.g. 10 (smaller number = faster)
-N_FILES_MAX_PER_SAMPLE = 5
+N_FILES_MAX_PER_SAMPLE = 20
 
 # enable Dask (currently will not work with Triton inference)
 USE_DASK = True
@@ -864,6 +864,12 @@ cabinetry.workspace.save(ws_ml, "workspace_ml.json")
 model_ml, data_ml = cabinetry.model_utils.model_and_data(ws_ml)
 
 # %% [markdown]
+# We can see that we've added a channel to the workspace:
+
+# %%
+# !pyhf inspect workspace_ml.json | head -n 20
+
+# %% [markdown]
 # Let's view the model obtained using the ML observable before the fit:
 
 # %%
@@ -875,7 +881,8 @@ figs[1]["figure"]
 # Now applying the fit results from the trijet combination observable to the ML observable, let's see whether we have good data-MC agreement:
 
 # %%
-model_prediction_postfit = cabinetry.model_utils.prediction(model_ml, fit_results=fit_results)
+fit_results_mod = cabinetry.model_utils.match_fit_results(model_ml, fit_results)
+model_prediction_postfit = cabinetry.model_utils.prediction(model_ml, fit_results=fit_results_mod)
 figs = cabinetry.visualize.data_mc(model_prediction_postfit, data_ml, close_figure=True)
 figs[1]["figure"]
 

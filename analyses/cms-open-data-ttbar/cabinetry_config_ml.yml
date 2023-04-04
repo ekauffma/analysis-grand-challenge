@@ -11,6 +11,9 @@ Regions:
 
   - Name: "4j2b SR"
     RegionPath: "4j2b"
+    
+  - Name: "4j2b CR"
+    RegionPath: "4j2bML"
 
 Samples:
   - Name: "Pseudodata"

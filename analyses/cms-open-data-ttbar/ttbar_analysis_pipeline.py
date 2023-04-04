@@ -61,12 +61,7 @@ import numpy as np
 import uproot
 
 # ML-related imports
-from sklearn.preprocessing import PowerTransformer
-import mlflow
-from mlflow.models.signature import infer_signature
-from mlflow.tracking import MlflowClient
 from xgboost import XGBClassifier
-from xgboost import plot_tree
 import tritonclient.grpc as grpcclient
 from sklearn.preprocessing import PowerTransformer
 
@@ -120,7 +115,7 @@ AF = "coffea_casa"
 ### BENCHMARKING-SPECIFIC SETTINGS
 
 # chunk size to use
-CHUNKSIZE = 100_000
+CHUNKSIZE = 200_000
 
 # metadata to propagate through to metrics
 AF_NAME = "coffea_casa"  # "ssl-dev" allows for the switch to local data on /data
@@ -144,8 +139,8 @@ MAX_N_JETS = 6
 USE_TRITON = False
 
 # path to local models (no triton)
-XGBOOST_MODEL_PATH_EVEN = "models/model_230324_even.model"
-XGBOOST_MODEL_PATH_ODD = "models/model_230324_odd.model"
+XGBOOST_MODEL_PATH_EVEN = "models/model_230404_even.model"
+XGBOOST_MODEL_PATH_ODD = "models/model_230404_odd.model"
 
 # name of model loaded in triton server
 MODEL_NAME = "reconstruction_bdt_xgb"
@@ -191,7 +186,7 @@ def get_features(jets, electrons, muons, permutations_dict):
     perm_counts = ak.num(perms)
     
     #### calculate features ####
-    features = np.zeros((sum(perm_counts),28))
+    features = np.zeros((sum(perm_counts),20))
     
     # grab lepton info
     leptons = ak.flatten(ak.concatenate((electrons, muons),axis=1),axis=-1)
@@ -213,55 +208,39 @@ def get_features(jets, electrons, muons, permutations_dict):
     features[:,3] = ak.flatten(np.sqrt((jets[perms[...,1]].eta - jets[perms[...,2]].eta)**2 + 
                                        (jets[perms[...,1]].phi - jets[perms[...,2]].phi)**2)).to_numpy()
 
-    # delta phi between top_lepton and lepton
-    features[:,4] = ak.flatten(np.abs(leptons.phi - jets[perms[...,3]].phi)).to_numpy()
-
-    # delta phi between the two W
-    features[:,5] = ak.flatten(np.abs(jets[perms[...,0]].phi - jets[perms[...,1]].phi)).to_numpy()
-
-    # delta phi between W and top_hadron
-    features[:,6] = ak.flatten(np.abs(jets[perms[...,0]].phi - jets[perms[...,2]].phi)).to_numpy()
-    features[:,7] = ak.flatten(np.abs(jets[perms[...,1]].phi - jets[perms[...,2]].phi)).to_numpy()
-
     # combined mass of top_lepton and lepton
-    features[:,8] = ak.flatten((leptons + jets[perms[...,3]]).mass).to_numpy()
+    features[:,4] = ak.flatten((leptons + jets[perms[...,3]]).mass).to_numpy()
 
     # combined mass of W
-    features[:,9] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]]).mass).to_numpy()
+    features[:,5] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]]).mass).to_numpy()
 
     # combined mass of W and top_hadron
-    features[:,10] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
-                                 jets[perms[...,2]]).mass).to_numpy()
+    features[:,6] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
+                                jets[perms[...,2]]).mass).to_numpy()
     
     feature_count+=1
     # combined pT of W and top_hadron
-    features[:,11] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
-                                 jets[perms[...,2]]).pt).to_numpy()
+    features[:,7] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
+                                jets[perms[...,2]]).pt).to_numpy()
 
 
     # pt of every jet
-    features[:,12] = ak.flatten(jets[perms[...,0]].pt).to_numpy()
-    features[:,13] = ak.flatten(jets[perms[...,1]].pt).to_numpy()
-    features[:,14] = ak.flatten(jets[perms[...,2]].pt).to_numpy()
-    features[:,15] = ak.flatten(jets[perms[...,3]].pt).to_numpy()
-
-    # mass of every jet
-    features[:,16] = ak.flatten(jets[perms[...,0]].mass).to_numpy()
-    features[:,17] = ak.flatten(jets[perms[...,1]].mass).to_numpy()
-    features[:,18] = ak.flatten(jets[perms[...,2]].mass).to_numpy()
-    features[:,19] = ak.flatten(jets[perms[...,3]].mass).to_numpy()
+    features[:,8] = ak.flatten(jets[perms[...,0]].pt).to_numpy()
+    features[:,9] = ak.flatten(jets[perms[...,1]].pt).to_numpy()
+    features[:,10] = ak.flatten(jets[perms[...,2]].pt).to_numpy()
+    features[:,11] = ak.flatten(jets[perms[...,3]].pt).to_numpy()
     
     # btagCSVV2 of every jet
-    features[:,20] = ak.flatten(jets[perms[...,0]].btagCSVV2).to_numpy()
-    features[:,21] = ak.flatten(jets[perms[...,1]].btagCSVV2).to_numpy()
-    features[:,22] = ak.flatten(jets[perms[...,2]].btagCSVV2).to_numpy()
-    features[:,23] = ak.flatten(jets[perms[...,3]].btagCSVV2).to_numpy()
+    features[:,12] = ak.flatten(jets[perms[...,0]].btagCSVV2).to_numpy()
+    features[:,13] = ak.flatten(jets[perms[...,1]].btagCSVV2).to_numpy()
+    features[:,14] = ak.flatten(jets[perms[...,2]].btagCSVV2).to_numpy()
+    features[:,15] = ak.flatten(jets[perms[...,3]].btagCSVV2).to_numpy()
     
     # qgl of every jet
-    features[:,24] = ak.flatten(jets[perms[...,0]].qgl).to_numpy()
-    features[:,25] = ak.flatten(jets[perms[...,1]].qgl).to_numpy()
-    features[:,26] = ak.flatten(jets[perms[...,2]].qgl).to_numpy()
-    features[:,27] = ak.flatten(jets[perms[...,3]].qgl).to_numpy()
+    features[:,16] = ak.flatten(jets[perms[...,0]].qgl).to_numpy()
+    features[:,17] = ak.flatten(jets[perms[...,1]].qgl).to_numpy()
+    features[:,18] = ak.flatten(jets[perms[...,2]].qgl).to_numpy()
+    features[:,19] = ak.flatten(jets[perms[...,3]].qgl).to_numpy()
     
     return features.astype(np.float32), perm_counts
 
@@ -372,6 +351,7 @@ class TtbarAnalysis(processor.ProcessorABC):
             return {"hist": {}}
 
     def process(self, events):
+        
         if self.disable_processing:
             # IO testing with no subsequent processing
             return self.only_do_IO(events)
@@ -389,6 +369,12 @@ class TtbarAnalysis(processor.ProcessorABC):
             xsec_weight = x_sec * lumi / nevts_total
         else:
             xsec_weight = 1
+        
+        #### LOCALEXECUTOR
+        # xgboost_model_even = XGBClassifier()
+        # xgboost_model_even.load_model(self.xgboost_model_even)
+        # xgboost_model_odd = XGBClassifier()
+        # xgboost_model_odd.load_model(self.xgboost_model_odd)
             
         if self.use_triton:
             # setup triton gRPC client
@@ -487,7 +473,7 @@ class TtbarAnalysis(processor.ProcessorABC):
                         output = grpcclient.InferRequestedOutput(output_name)
                         
                         inpt = [grpcclient.InferInput(input_name, features[even_perm].shape, dtype)]
-                        inpt[0].set_data_from_numpy(power.fit_transform(features[even_perm]))
+                        inpt[0].set_data_from_numpy(features[even_perm])
                         results[even_region]=triton_client.infer(
                             model_name=self.model_name, 
                             model_version=self.model_version_even,
@@ -496,7 +482,7 @@ class TtbarAnalysis(processor.ProcessorABC):
                         ).as_numpy(output_name)[:, 1]
                         
                         inpt = [grpcclient.InferInput(input_name, features[np.invert(even_perm)].shape, dtype)]
-                        inpt[0].set_data_from_numpy(power.fit_transform(features[np.invert(even_perm)]))
+                        inpt[0].set_data_from_numpy(features[np.invert(even_perm)])
                         results[np.invert(even_region)]=triton_client.infer(
                             model_name=self.model_name, 
                             model_version=self.model_version_odd,
@@ -507,17 +493,14 @@ class TtbarAnalysis(processor.ProcessorABC):
                     else:
                         
                         results = np.zeros(features.shape[0])
-                        results[even_perm] = self.xgboost_model_even.predict_proba(
-                            power.fit_transform(features[even_perm,:])
-                        )[:, 1]
-                        results[np.invert(even_perm)] = results_odd = self.xgboost_model_odd.predict_proba(
-                            power.fit_transform(features[np.invert(even_perm),:])
-                        )[:, 1]
+                        results[even_perm] = self.xgboost_model_even.predict_proba(features[even_perm,:])[:, 1]
+                        results[np.invert(even_perm)] = results_odd = self.xgboost_model_odd.predict_proba(features[np.invert(even_perm),:])[:, 1]
                         
                     results = ak.unflatten(results, perm_counts)
                     which_combination = ak.argmax(results,axis=1)
                     features_unflattened = ak.unflatten(features, perm_counts)
-                    ML_observable = ak.flatten(features_unflattened[ak.from_regular(which_combination[:, np.newaxis])])[...,10]
+                    ML_observable = ak.flatten(features_unflattened[ak.from_regular(which_combination[:, np.newaxis])])[...,6]
+                    # ML_observable = observable
                     
                 ### histogram filling
                 if pt_var == "pt_nominal":
@@ -562,8 +545,6 @@ class TtbarAnalysis(processor.ProcessorABC):
 
         
         output = {"nevents": {events.metadata["dataset"]: len(events)},
-                  "training_entries": {events.metadata["dataset"]: len(features)},
-                  "nevents_reduced": {events.metadata["dataset"]: len(observable)},
                   "hist": histogram}
         
         if self.use_triton:

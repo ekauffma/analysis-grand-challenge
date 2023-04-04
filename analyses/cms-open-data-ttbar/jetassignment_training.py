@@ -51,7 +51,6 @@ import utils
 
 # ML-related imports
 from dask.distributed import Client
-from sklearn.preprocessing import PowerTransformer
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 from sklearn.model_selection import ParameterSampler, train_test_split, KFold, cross_validate
 import mlflow
@@ -64,7 +63,7 @@ import onnx
 ### GLOBAL CONFIGURATION
 
 # input files per process, set to e.g. 10 (smaller number = faster, want to use larger number for training)
-N_FILES_MAX_PER_SAMPLE = 5
+N_FILES_MAX_PER_SAMPLE = 20
 
 # set to True for DaskExecutor
 USE_DASK_PROCESSING = True
@@ -81,7 +80,7 @@ AF = "coffea_casa"
 ### MACHINE LEARNING OPTIONS
 
 # enable Dask (whether to use dask for hyperparameter optimization)
-USE_DASK_ML = True
+USE_DASK_ML = False
 
 # enable MLFlow logging (to store metrics and models of hyperparameter optimization trials)
 USE_MLFLOW = True
@@ -104,7 +103,7 @@ WRITE_OVER = True
 # number of events to train with for each model (N events = 12*N dataset)
 N_EVENTS_TRAIN = -1
 
-N_FEATURES = 28
+N_FEATURES = 20
 
 # %%
 # get dictionaries for permutation indices, associated labels, and evaluation matrices
@@ -214,7 +213,7 @@ def get_training_set(jets, electrons, muons, labels, permutations_dict, labels_d
     perm_counts = ak.num(perms)
     
     #### calculate features ####
-    features = np.zeros((sum(perm_counts),28))
+    features = np.zeros((sum(perm_counts),20))
     
     # grab lepton info
     leptons = ak.flatten(ak.concatenate((electrons, muons),axis=1),axis=-1)
@@ -236,55 +235,39 @@ def get_training_set(jets, electrons, muons, labels, permutations_dict, labels_d
     features[:,3] = ak.flatten(np.sqrt((jets[perms[...,1]].eta - jets[perms[...,2]].eta)**2 + 
                                        (jets[perms[...,1]].phi - jets[perms[...,2]].phi)**2)).to_numpy()
 
-    # delta phi between top_lepton and lepton
-    features[:,4] = ak.flatten(np.abs(leptons.phi - jets[perms[...,3]].phi)).to_numpy()
-
-    # delta phi between the two W
-    features[:,5] = ak.flatten(np.abs(jets[perms[...,0]].phi - jets[perms[...,1]].phi)).to_numpy()
-
-    # delta phi between W and top_hadron
-    features[:,6] = ak.flatten(np.abs(jets[perms[...,0]].phi - jets[perms[...,2]].phi)).to_numpy()
-    features[:,7] = ak.flatten(np.abs(jets[perms[...,1]].phi - jets[perms[...,2]].phi)).to_numpy()
-
     # combined mass of top_lepton and lepton
-    features[:,8] = ak.flatten((leptons + jets[perms[...,3]]).mass).to_numpy()
+    features[:,4] = ak.flatten((leptons + jets[perms[...,3]]).mass).to_numpy()
 
     # combined mass of W
-    features[:,9] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]]).mass).to_numpy()
+    features[:,5] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]]).mass).to_numpy()
 
     # combined mass of W and top_hadron
-    features[:,10] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
-                                 jets[perms[...,2]]).mass).to_numpy()
+    features[:,6] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
+                                jets[perms[...,2]]).mass).to_numpy()
     
     feature_count+=1
     # combined pT of W and top_hadron
-    features[:,11] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
-                                 jets[perms[...,2]]).pt).to_numpy()
+    features[:,7] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
+                                jets[perms[...,2]]).pt).to_numpy()
 
 
     # pt of every jet
-    features[:,12] = ak.flatten(jets[perms[...,0]].pt).to_numpy()
-    features[:,13] = ak.flatten(jets[perms[...,1]].pt).to_numpy()
-    features[:,14] = ak.flatten(jets[perms[...,2]].pt).to_numpy()
-    features[:,15] = ak.flatten(jets[perms[...,3]].pt).to_numpy()
-
-    # mass of every jet
-    features[:,16] = ak.flatten(jets[perms[...,0]].mass).to_numpy()
-    features[:,17] = ak.flatten(jets[perms[...,1]].mass).to_numpy()
-    features[:,18] = ak.flatten(jets[perms[...,2]].mass).to_numpy()
-    features[:,19] = ak.flatten(jets[perms[...,3]].mass).to_numpy()
+    features[:,8] = ak.flatten(jets[perms[...,0]].pt).to_numpy()
+    features[:,9] = ak.flatten(jets[perms[...,1]].pt).to_numpy()
+    features[:,10] = ak.flatten(jets[perms[...,2]].pt).to_numpy()
+    features[:,11] = ak.flatten(jets[perms[...,3]].pt).to_numpy()
     
     # btagCSVV2 of every jet
-    features[:,20] = ak.flatten(jets[perms[...,0]].btagCSVV2).to_numpy()
-    features[:,21] = ak.flatten(jets[perms[...,1]].btagCSVV2).to_numpy()
-    features[:,22] = ak.flatten(jets[perms[...,2]].btagCSVV2).to_numpy()
-    features[:,23] = ak.flatten(jets[perms[...,3]].btagCSVV2).to_numpy()
+    features[:,12] = ak.flatten(jets[perms[...,0]].btagCSVV2).to_numpy()
+    features[:,13] = ak.flatten(jets[perms[...,1]].btagCSVV2).to_numpy()
+    features[:,14] = ak.flatten(jets[perms[...,2]].btagCSVV2).to_numpy()
+    features[:,15] = ak.flatten(jets[perms[...,3]].btagCSVV2).to_numpy()
     
     # qgl of every jet
-    features[:,24] = ak.flatten(jets[perms[...,0]].qgl).to_numpy()
-    features[:,25] = ak.flatten(jets[perms[...,1]].qgl).to_numpy()
-    features[:,26] = ak.flatten(jets[perms[...,2]].qgl).to_numpy()
-    features[:,27] = ak.flatten(jets[perms[...,3]].qgl).to_numpy()
+    features[:,16] = ak.flatten(jets[perms[...,0]].qgl).to_numpy()
+    features[:,17] = ak.flatten(jets[perms[...,1]].qgl).to_numpy()
+    features[:,18] = ak.flatten(jets[perms[...,2]].qgl).to_numpy()
+    features[:,19] = ak.flatten(jets[perms[...,3]].qgl).to_numpy()
     
     #### calculate combination-level labels ####
     permutation_labels = np.array(labels_dict[4])
@@ -462,11 +445,11 @@ output, metrics = run(fileset,
 
 # %%
 import pickle
-pickle.dump(output, open("output_temp4.p", "wb"))
+pickle.dump(output, open("output_temp5.p", "wb"))
 
 # %%
 import pickle
-output = pickle.load(open("output_temp4.p", "rb"))
+output = pickle.load(open("output_temp5.p", "rb"))
 
 # %%
 # grab features and labels and convert to np array
@@ -477,15 +460,6 @@ observable = output['observable'].value
 
 labels = labels.reshape((len(labels),))
 even = np.repeat(even, 12)
-
-# %%
-features.shape
-
-# %%
-# investigate labels
-print(len(labels))
-print(len(labels)/12)
-print(sum(labels==1))
 
 # %%
 features.shape
@@ -559,55 +533,6 @@ ax.set_title("$\Delta R$ between W jet and top_hadron jet")
 fig.show()
 
 # %% tags=[]
-#### delta phi histogram ####
-
-# binning
-deltaphi_low = 0.0
-deltaphi_high = 2*np.pi
-deltaphi_numbins = 100
-legend_list = ["All Matches Correct", "Some Matches Correct", "No Matches Correct"]
-
-# define histogram
-h = hist.Hist(
-    hist.axis.Regular(deltaphi_numbins, deltaphi_low, deltaphi_high, name="deltaphi", label="$\Delta \phi$", flow=False),
-    hist.axis.StrCategory(legend_list, name="truthlabel", label="Truth Label"),
-    hist.axis.StrCategory(["toplep_lepton","W_W","tophad_W"], name="category", label="Category"),
-)
-
-# fill histogram
-h.fill(deltaphi = all_correct[:,4], category="toplep_lepton", truthlabel="All Matches Correct")
-h.fill(deltaphi = some_correct[:,4], category="toplep_lepton", truthlabel="Some Matches Correct")
-h.fill(deltaphi = none_correct[:,4], category="toplep_lepton", truthlabel="No Matches Correct")
-h.fill(deltaphi = all_correct[:,5], category="W_W", truthlabel="All Matches Correct")
-h.fill(deltaphi = some_correct[:,5], category="W_W", truthlabel="Some Matches Correct")
-h.fill(deltaphi = none_correct[:,5], category="W_W", truthlabel="No Matches Correct")
-h.fill(deltaphi = all_correct[:,6], category="tophad_W", truthlabel="All Matches Correct")
-h.fill(deltaphi = some_correct[:,6], category="tophad_W", truthlabel="Some Matches Correct")
-h.fill(deltaphi = none_correct[:,6], category="tophad_W", truthlabel="No Matches Correct")
-h.fill(deltaphi = all_correct[:,7], category="tophad_W", truthlabel="All Matches Correct")
-h.fill(deltaphi = some_correct[:,7], category="tophad_W", truthlabel="Some Matches Correct")
-h.fill(deltaphi = none_correct[:,7], category="tophad_W", truthlabel="No Matches Correct")
-
-# make plots
-fig,ax = plt.subplots(1,1,figsize=(8,4))
-h[0j::hist.rebin(2), :, "toplep_lepton"].plot(density=True, ax=ax)
-ax.legend(legend_list)
-ax.set_title("$\Delta \phi$ between top_lepton jet and lepton")
-fig.show()
-
-fig,ax = plt.subplots(1,1,figsize=(8,4))
-h[0j::hist.rebin(2), :, "W_W"].plot(density=True, ax=ax)
-ax.legend(legend_list)
-ax.set_title("$\Delta \phi$ between the two W jets")
-fig.show()
-
-fig,ax = plt.subplots(1,1,figsize=(8,4))
-h[0j::hist.rebin(2), :, "tophad_W"].plot(density=True, ax=ax)
-ax.legend(legend_list)
-ax.set_title("$\Delta \phi$ between W jet and top_hadron jet")
-fig.show()
-
-# %% tags=[]
 #### mass histogram ####
 
 # binning
@@ -625,15 +550,15 @@ h = hist.Hist(
 )
 
 # fill histogram
-h.fill(combinedmass = all_correct[:,8], category="toplep_lepton", truthlabel="All Matches Correct")
-h.fill(combinedmass = some_correct[:,8], category="toplep_lepton", truthlabel="Some Matches Correct")
-h.fill(combinedmass = none_correct[:,8], category="toplep_lepton", truthlabel="No Matches Correct")
-h.fill(combinedmass = all_correct[:,9], category="W_W", truthlabel="All Matches Correct")
-h.fill(combinedmass = some_correct[:,9], category="W_W", truthlabel="Some Matches Correct")
-h.fill(combinedmass = none_correct[:,9], category="W_W", truthlabel="No Matches Correct")
-h.fill(combinedmass = all_correct[:,10], category="tophad_W_W", truthlabel="All Matches Correct")
-h.fill(combinedmass = some_correct[:,10], category="tophad_W_W", truthlabel="Some Matches Correct")
-h.fill(combinedmass = none_correct[:,10], category="tophad_W_W", truthlabel="No Matches Correct")
+h.fill(combinedmass = all_correct[:,4], category="toplep_lepton", truthlabel="All Matches Correct")
+h.fill(combinedmass = some_correct[:,4], category="toplep_lepton", truthlabel="Some Matches Correct")
+h.fill(combinedmass = none_correct[:,4], category="toplep_lepton", truthlabel="No Matches Correct")
+h.fill(combinedmass = all_correct[:,5], category="W_W", truthlabel="All Matches Correct")
+h.fill(combinedmass = some_correct[:,5], category="W_W", truthlabel="Some Matches Correct")
+h.fill(combinedmass = none_correct[:,5], category="W_W", truthlabel="No Matches Correct")
+h.fill(combinedmass = all_correct[:,6], category="tophad_W_W", truthlabel="All Matches Correct")
+h.fill(combinedmass = some_correct[:,6], category="tophad_W_W", truthlabel="Some Matches Correct")
+h.fill(combinedmass = none_correct[:,6], category="tophad_W_W", truthlabel="No Matches Correct")
 
 # make plots
 fig,ax = plt.subplots(1,1,figsize=(8,4))
@@ -653,7 +578,7 @@ fig.show()
 fig,ax = plt.subplots(1,1,figsize=(8,4))
 h[:, :, "tophad_W_W"].plot(density=True, ax=ax)
 ax.legend(legend_list)
-ax.set_title("Combined mass of W jets and top_hadron jet")
+ax.set_title("Combined mass of W jets and top_hadron jet (Reconstructed Top Mass)")
 ax.set_xlim([0,600])
 fig.show()
 
@@ -674,9 +599,9 @@ h = hist.Hist(
 )
 
 # fill histogram
-h.fill(pt = all_correct[:,11], truthlabel="All Matches Correct")
-h.fill(pt = some_correct[:,11], truthlabel="Some Matches Correct")
-h.fill(pt = none_correct[:,11], truthlabel="No Matches Correct")
+h.fill(pt = all_correct[:,7], truthlabel="All Matches Correct")
+h.fill(pt = some_correct[:,7], truthlabel="Some Matches Correct")
+h.fill(pt = none_correct[:,7], truthlabel="No Matches Correct")
 
 # make plots
 fig,ax = plt.subplots(1,1,figsize=(8,4))
@@ -704,18 +629,18 @@ h = hist.Hist(
 )
 
 # fill histogram
-h.fill(jetpt = all_correct[:,12], category="W", truthlabel="All Matches Correct")
-h.fill(jetpt = some_correct[:,12], category="W", truthlabel="Some Matches Correct")
-h.fill(jetpt = none_correct[:,12], category="W", truthlabel="No Matches Correct")
-h.fill(jetpt = all_correct[:,13], category="W", truthlabel="All Matches Correct")
-h.fill(jetpt = some_correct[:,13], category="W", truthlabel="Some Matches Correct")
-h.fill(jetpt = none_correct[:,13], category="W", truthlabel="No Matches Correct")
-h.fill(jetpt = all_correct[:,14], category="tophad", truthlabel="All Matches Correct")
-h.fill(jetpt = some_correct[:,14], category="tophad", truthlabel="Some Matches Correct")
-h.fill(jetpt = none_correct[:,14], category="tophad", truthlabel="No Matches Correct")
-h.fill(jetpt = all_correct[:,15], category="toplep", truthlabel="All Matches Correct")
-h.fill(jetpt = some_correct[:,15], category="toplep", truthlabel="Some Matches Correct")
-h.fill(jetpt = none_correct[:,15], category="toplep", truthlabel="No Matches Correct")
+h.fill(jetpt = all_correct[:,8], category="W", truthlabel="All Matches Correct")
+h.fill(jetpt = some_correct[:,8], category="W", truthlabel="Some Matches Correct")
+h.fill(jetpt = none_correct[:,8], category="W", truthlabel="No Matches Correct")
+h.fill(jetpt = all_correct[:,9], category="W", truthlabel="All Matches Correct")
+h.fill(jetpt = some_correct[:,9], category="W", truthlabel="Some Matches Correct")
+h.fill(jetpt = none_correct[:,9], category="W", truthlabel="No Matches Correct")
+h.fill(jetpt = all_correct[:,10], category="tophad", truthlabel="All Matches Correct")
+h.fill(jetpt = some_correct[:,10], category="tophad", truthlabel="Some Matches Correct")
+h.fill(jetpt = none_correct[:,10], category="tophad", truthlabel="No Matches Correct")
+h.fill(jetpt = all_correct[:,11], category="toplep", truthlabel="All Matches Correct")
+h.fill(jetpt = some_correct[:,11], category="toplep", truthlabel="Some Matches Correct")
+h.fill(jetpt = none_correct[:,11], category="toplep", truthlabel="No Matches Correct")
 
 # make plots
 fig,ax = plt.subplots(1,1,figsize=(8,4))
@@ -740,56 +665,6 @@ ax.set_xlim([25,200])
 fig.show()
 
 # %% tags=[]
-#### mass histogram ####
-
-# binning
-mass_low = 0.0
-mass_high = 50.0
-mass_numbins = 100
-legend_list = ["All Matches Correct", "Some Matches Correct", "No Matches Correct"]
-
-# define histogram
-h = hist.Hist(
-    hist.axis.Regular(mass_numbins, mass_low, mass_high, 
-                      name="jetmass", label="Jet Mass [GeV]", flow=False),
-    hist.axis.StrCategory(legend_list, name="truthlabel", label="Truth Label"),
-    hist.axis.StrCategory(["W","toplep","tophad"], name="category", label="Category"),
-)
-
-# fill histogram
-h.fill(jetmass = all_correct[:,16], category="W", truthlabel="All Matches Correct")
-h.fill(jetmass = some_correct[:,16], category="W", truthlabel="Some Matches Correct")
-h.fill(jetmass = none_correct[:,16], category="W", truthlabel="No Matches Correct")
-h.fill(jetmass = all_correct[:,17], category="W", truthlabel="All Matches Correct")
-h.fill(jetmass = some_correct[:,17], category="W", truthlabel="Some Matches Correct")
-h.fill(jetmass = none_correct[:,17], category="W", truthlabel="No Matches Correct")
-h.fill(jetmass = all_correct[:,18], category="tophad", truthlabel="All Matches Correct")
-h.fill(jetmass = some_correct[:,18], category="tophad", truthlabel="Some Matches Correct")
-h.fill(jetmass = none_correct[:,18], category="tophad", truthlabel="No Matches Correct")
-h.fill(jetmass = all_correct[:,19], category="toplep", truthlabel="All Matches Correct")
-h.fill(jetmass = some_correct[:,19], category="toplep", truthlabel="Some Matches Correct")
-h.fill(jetmass = none_correct[:,19], category="toplep", truthlabel="No Matches Correct")
-
-# make plots
-fig,ax = plt.subplots(1,1,figsize=(8,4))
-h[:, :, "W"].plot(density=True, ax=ax)
-ax.legend(legend_list)
-ax.set_title("W Jet Mass")
-# fig.show()
-
-fig,ax = plt.subplots(1,1,figsize=(8,4))
-h[:, :, "tophad"].plot(density=True, ax=ax)
-ax.legend(legend_list)
-ax.set_title("top_hadron Jet Mass")
-fig.show()
-
-fig,ax = plt.subplots(1,1,figsize=(8,4))
-h[:, :, "toplep"].plot(density=True, ax=ax)
-ax.legend(legend_list)
-ax.set_title("top_lepton Jet Mass")
-fig.show()
-
-# %%
 #### btag histogram ####
 
 # binning
@@ -807,18 +682,18 @@ h = hist.Hist(
 )
 
 # fill histogram
-h.fill(btag = all_correct[:,20], category="W", truthlabel="All Matches Correct")
-h.fill(btag = some_correct[:,20], category="W", truthlabel="Some Matches Correct")
-h.fill(btag = none_correct[:,20], category="W", truthlabel="No Matches Correct")
-h.fill(btag = all_correct[:,21], category="W", truthlabel="All Matches Correct")
-h.fill(btag = some_correct[:,21], category="W", truthlabel="Some Matches Correct")
-h.fill(btag = none_correct[:,21], category="W", truthlabel="No Matches Correct")
-h.fill(btag = all_correct[:,22], category="tophad", truthlabel="All Matches Correct")
-h.fill(btag = some_correct[:,22], category="tophad", truthlabel="Some Matches Correct")
-h.fill(btag = none_correct[:,22], category="tophad", truthlabel="No Matches Correct")
-h.fill(btag = all_correct[:,23], category="toplep", truthlabel="All Matches Correct")
-h.fill(btag = some_correct[:,23], category="toplep", truthlabel="Some Matches Correct")
-h.fill(btag = none_correct[:,23], category="toplep", truthlabel="No Matches Correct")
+h.fill(btag = all_correct[:,12], category="W", truthlabel="All Matches Correct")
+h.fill(btag = some_correct[:,12], category="W", truthlabel="Some Matches Correct")
+h.fill(btag = none_correct[:,12], category="W", truthlabel="No Matches Correct")
+h.fill(btag = all_correct[:,13], category="W", truthlabel="All Matches Correct")
+h.fill(btag = some_correct[:,13], category="W", truthlabel="Some Matches Correct")
+h.fill(btag = none_correct[:,13], category="W", truthlabel="No Matches Correct")
+h.fill(btag = all_correct[:,14], category="tophad", truthlabel="All Matches Correct")
+h.fill(btag = some_correct[:,14], category="tophad", truthlabel="Some Matches Correct")
+h.fill(btag = none_correct[:,14], category="tophad", truthlabel="No Matches Correct")
+h.fill(btag = all_correct[:,15], category="toplep", truthlabel="All Matches Correct")
+h.fill(btag = some_correct[:,15], category="toplep", truthlabel="Some Matches Correct")
+h.fill(btag = none_correct[:,15], category="toplep", truthlabel="No Matches Correct")
 
 # make plots
 fig,ax = plt.subplots(1,1,figsize=(8,4))
@@ -839,7 +714,7 @@ ax.legend(legend_list)
 ax.set_title("top_lepton Jet btag")
 fig.show()
 
-# %%
+# %% tags=[]
 #### qgl histogram ####
 
 # binning
@@ -857,18 +732,18 @@ h = hist.Hist(
 )
 
 # fill histogram
-h.fill(qgl = all_correct[:,24], category="W", truthlabel="All Matches Correct")
-h.fill(qgl = some_correct[:,24], category="W", truthlabel="Some Matches Correct")
-h.fill(qgl = none_correct[:,24], category="W", truthlabel="No Matches Correct")
-h.fill(qgl = all_correct[:,25], category="W", truthlabel="All Matches Correct")
-h.fill(qgl = some_correct[:,25], category="W", truthlabel="Some Matches Correct")
-h.fill(qgl = none_correct[:,25], category="W", truthlabel="No Matches Correct")
-h.fill(qgl = all_correct[:,26], category="tophad", truthlabel="All Matches Correct")
-h.fill(qgl = some_correct[:,26], category="tophad", truthlabel="Some Matches Correct")
-h.fill(qgl = none_correct[:,26], category="tophad", truthlabel="No Matches Correct")
-h.fill(qgl = all_correct[:,27], category="toplep", truthlabel="All Matches Correct")
-h.fill(qgl = some_correct[:,27], category="toplep", truthlabel="Some Matches Correct")
-h.fill(qgl = none_correct[:,27], category="toplep", truthlabel="No Matches Correct")
+h.fill(qgl = all_correct[:,16], category="W", truthlabel="All Matches Correct")
+h.fill(qgl = some_correct[:,16], category="W", truthlabel="Some Matches Correct")
+h.fill(qgl = none_correct[:,16], category="W", truthlabel="No Matches Correct")
+h.fill(qgl = all_correct[:,17], category="W", truthlabel="All Matches Correct")
+h.fill(qgl = some_correct[:,17], category="W", truthlabel="Some Matches Correct")
+h.fill(qgl = none_correct[:,17], category="W", truthlabel="No Matches Correct")
+h.fill(qgl = all_correct[:,18], category="tophad", truthlabel="All Matches Correct")
+h.fill(qgl = some_correct[:,18], category="tophad", truthlabel="Some Matches Correct")
+h.fill(qgl = none_correct[:,18], category="tophad", truthlabel="No Matches Correct")
+h.fill(qgl = all_correct[:,19], category="toplep", truthlabel="All Matches Correct")
+h.fill(qgl = some_correct[:,19], category="toplep", truthlabel="Some Matches Correct")
+h.fill(qgl = none_correct[:,19], category="toplep", truthlabel="No Matches Correct")
 
 # make plots
 fig,ax = plt.subplots(1,1,figsize=(8,4))
@@ -928,17 +803,10 @@ print("features_even.shape = ", features_even.shape)
 print("features_odd.shape = ", features_odd.shape)
 
 # %%
-# preprocess features so that they are more Gaussian-like
-power = PowerTransformer(method='yeo-johnson', standardize=True)
-
-features_even = power.fit_transform(features_even)
-features_odd = power.fit_transform(features_odd)
-
-# %%
 # set up trials
 if USE_MLFLOW:
     
-    os.environ['MLFLOW_TRACKING_TOKEN'] = "eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJ6eXdjRVdfd2hOSzBTMDJLS3Nxd0Q0cGNjTXJpc1BSUUJDcEo4T0o1Rm40In0.eyJleHAiOjE2Nzk2ODE3NDksImlhdCI6MTY3OTY0NTc1MywiYXV0aF90aW1lIjoxNjc5NjQ1NzQ5LCJqdGkiOiJjY2IxZDQ3NC1hY2E0LTRlNTgtYWEzNC02YzFkZDBhMDg1M2EiLCJpc3MiOiJodHRwczovL2tleWNsb2FrLnNvZnR3YXJlLWRldi5uY3NhLmlsbGlub2lzLmVkdS9yZWFsbXMvbWxmbG93IiwiYXVkIjpbIm1sZmxvdy1kZW1vIiwiYWNjb3VudCJdLCJzdWIiOiIyOTdhM2ExNS02Nzc0LTQ0NDItOGVjNy0zNzBlNmVhNzM2MWIiLCJ0eXAiOiJCZWFyZXIiLCJhenAiOiJtbGZsb3ctZGVtbyIsInNlc3Npb25fc3RhdGUiOiIyNzc1ZGRjMC0zZGI0LTQyMDgtOTA4MS04NTU3ZDY0MjllODUiLCJzY29wZSI6InByb2ZpbGUgZ3JvdXBzIGVtYWlsIiwic2lkIjoiMjc3NWRkYzAtM2RiNC00MjA4LTkwODEtODU1N2Q2NDI5ZTg1IiwiZW1haWxfdmVyaWZpZWQiOnRydWUsIm5hbWUiOiJFbGxpb3R0IEthdWZmbWFuIiwiZ3JvdXBzIjpbIi9ncnBfamlyYV91c2VycyIsIi9zZF9tbGZsb3ciLCIvYWxsX3VzZXJzIiwiL2ppcmEtdXNlcnMiLCIvYWxsX2hwY191c2VyX3NwbyIsIm9mZmxpbmVfYWNjZXNzIiwiZGVmYXVsdC1yb2xlcy1tbGZsb3ciLCJ1bWFfYXV0aG9yaXphdGlvbiJdLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJla2F1ZmZtYSIsImdpdmVuX25hbWUiOiJFbGxpb3R0IiwiZmFtaWx5X25hbWUiOiJLYXVmZm1hbiIsImVtYWlsIjoiZWxtYWthODcwMEBnbWFpbC5jb20ifQ.byWdbaHzbJj-MQxfvRc8wc7jqN_FEAA4eE2qCVKfbVuGtEhs4MxJCUrNEoc_z47TD4HZGLLVcaXFFN5NWUjlTSilDzFnPHqsIXpFcTiPC24oyU9wixkAq3jWmwO2cVJ6jzacxKYz1gU_0lqmxB2JVmM3vfC0HjZakePL6SKWAvlbuEeWVoYtdpGSvHMWvhBVdVN_26SvIr1_YWu2s2pV-Kf2Nmjch1MAWgcDamJGllkfIJlaHd2-V0KB4_DBVmHkoa96A-wjglunYHW_PjfgjeFHBhmREv8__mocsobDkxuLJ8PU5sKxVszPxjFxzBbv9GxtQw_7ZKn-FKHWv1TlxA"
+    os.environ['MLFLOW_TRACKING_TOKEN'] = "eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJ6eXdjRVdfd2hOSzBTMDJLS3Nxd0Q0cGNjTXJpc1BSUUJDcEo4T0o1Rm40In0.eyJleHAiOjE2ODA2NDExOTEsImlhdCI6MTY4MDYwNTE5MSwiYXV0aF90aW1lIjoxNjgwNjA1MTkxLCJqdGkiOiJjNWU3ZTE0ZC1iOTYwLTQ0ZGUtYTIxMS1lZDYxMWQ1MzcyN2EiLCJpc3MiOiJodHRwczovL2tleWNsb2FrLnNvZnR3YXJlLWRldi5uY3NhLmlsbGlub2lzLmVkdS9yZWFsbXMvbWxmbG93IiwiYXVkIjpbIm1sZmxvdy1kZW1vIiwiYWNjb3VudCJdLCJzdWIiOiIyOTdhM2ExNS02Nzc0LTQ0NDItOGVjNy0zNzBlNmVhNzM2MWIiLCJ0eXAiOiJCZWFyZXIiLCJhenAiOiJtbGZsb3ctZGVtbyIsInNlc3Npb25fc3RhdGUiOiI0NmJjZGE1YS05NTdkLTQ2NmQtYjgyZC0yZTU2MDdiOTQzYTUiLCJzY29wZSI6InByb2ZpbGUgZ3JvdXBzIGVtYWlsIiwic2lkIjoiNDZiY2RhNWEtOTU3ZC00NjZkLWI4MmQtMmU1NjA3Yjk0M2E1IiwiZW1haWxfdmVyaWZpZWQiOnRydWUsIm5hbWUiOiJFbGxpb3R0IEthdWZmbWFuIiwiZ3JvdXBzIjpbIi9ncnBfamlyYV91c2VycyIsIi9zZF9tbGZsb3ciLCIvYWxsX3VzZXJzIiwiL2ppcmEtdXNlcnMiLCIvYWxsX2hwY191c2VyX3NwbyIsIm9mZmxpbmVfYWNjZXNzIiwiZGVmYXVsdC1yb2xlcy1tbGZsb3ciLCJ1bWFfYXV0aG9yaXphdGlvbiJdLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJla2F1ZmZtYSIsImdpdmVuX25hbWUiOiJFbGxpb3R0IiwiZmFtaWx5X25hbWUiOiJLYXVmZm1hbiIsImVtYWlsIjoiZWxtYWthODcwMEBnbWFpbC5jb20ifQ.Dfu46_QioMQuHyvoFlpgXIv6rfBcpEsdCX--yESX0hN-CzeLuWsYqWWxm2r9mPMYKKhp65907kRPmLUOEFy7o3qE9OSDucZVGfc_jve-RLY4FX2fmi0jw3r-9TjRZO3uNwM2yqoqd_6QGOjR4-Flw6QNgi8u3H_PN0Jh_aswWK46BBbktQrRQsK-aNK-Hj3K3la_FK4fJPObOeX8F2MkepbJoVxZcvXXLaSndaR0vcN1OeAxiFAaHtV-aVu53AmRF7TyizNk9SYZLzZOhzu0yIgr0K-duEd_QTgIKjX_7DZ2VHmDBBigWMbXgsjN06NgXHi7nWqBAdHABd9zFKYHjw"
     os.environ['MLFLOW_TRACKING_URI'] = "https://mlflow-demo.software-dev.ncsa.illinois.edu"
     
     mlflow.set_tracking_uri('https://mlflow-demo.software-dev.ncsa.illinois.edu') 
@@ -1096,7 +964,7 @@ def fit_model(params,
               labels, 
               evaluation_matrix,
               n_folds,
-              N_FEATURES=28,
+              N_FEATURES=20,
               mlflowclient=None,
               use_mlflow=False,
               log_models=False,
@@ -1151,7 +1019,7 @@ def fit_model(params,
 # function to provide necessary environment variables to workers
 def initialize_mlflow(): 
     
-    os.environ['MLFLOW_TRACKING_TOKEN'] = "eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJ6eXdjRVdfd2hOSzBTMDJLS3Nxd0Q0cGNjTXJpc1BSUUJDcEo4T0o1Rm40In0.eyJleHAiOjE2Nzk2ODE3NDksImlhdCI6MTY3OTY0NTc1MywiYXV0aF90aW1lIjoxNjc5NjQ1NzQ5LCJqdGkiOiJjY2IxZDQ3NC1hY2E0LTRlNTgtYWEzNC02YzFkZDBhMDg1M2EiLCJpc3MiOiJodHRwczovL2tleWNsb2FrLnNvZnR3YXJlLWRldi5uY3NhLmlsbGlub2lzLmVkdS9yZWFsbXMvbWxmbG93IiwiYXVkIjpbIm1sZmxvdy1kZW1vIiwiYWNjb3VudCJdLCJzdWIiOiIyOTdhM2ExNS02Nzc0LTQ0NDItOGVjNy0zNzBlNmVhNzM2MWIiLCJ0eXAiOiJCZWFyZXIiLCJhenAiOiJtbGZsb3ctZGVtbyIsInNlc3Npb25fc3RhdGUiOiIyNzc1ZGRjMC0zZGI0LTQyMDgtOTA4MS04NTU3ZDY0MjllODUiLCJzY29wZSI6InByb2ZpbGUgZ3JvdXBzIGVtYWlsIiwic2lkIjoiMjc3NWRkYzAtM2RiNC00MjA4LTkwODEtODU1N2Q2NDI5ZTg1IiwiZW1haWxfdmVyaWZpZWQiOnRydWUsIm5hbWUiOiJFbGxpb3R0IEthdWZmbWFuIiwiZ3JvdXBzIjpbIi9ncnBfamlyYV91c2VycyIsIi9zZF9tbGZsb3ciLCIvYWxsX3VzZXJzIiwiL2ppcmEtdXNlcnMiLCIvYWxsX2hwY191c2VyX3NwbyIsIm9mZmxpbmVfYWNjZXNzIiwiZGVmYXVsdC1yb2xlcy1tbGZsb3ciLCJ1bWFfYXV0aG9yaXphdGlvbiJdLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJla2F1ZmZtYSIsImdpdmVuX25hbWUiOiJFbGxpb3R0IiwiZmFtaWx5X25hbWUiOiJLYXVmZm1hbiIsImVtYWlsIjoiZWxtYWthODcwMEBnbWFpbC5jb20ifQ.byWdbaHzbJj-MQxfvRc8wc7jqN_FEAA4eE2qCVKfbVuGtEhs4MxJCUrNEoc_z47TD4HZGLLVcaXFFN5NWUjlTSilDzFnPHqsIXpFcTiPC24oyU9wixkAq3jWmwO2cVJ6jzacxKYz1gU_0lqmxB2JVmM3vfC0HjZakePL6SKWAvlbuEeWVoYtdpGSvHMWvhBVdVN_26SvIr1_YWu2s2pV-Kf2Nmjch1MAWgcDamJGllkfIJlaHd2-V0KB4_DBVmHkoa96A-wjglunYHW_PjfgjeFHBhmREv8__mocsobDkxuLJ8PU5sKxVszPxjFxzBbv9GxtQw_7ZKn-FKHWv1TlxA"
+    os.environ['MLFLOW_TRACKING_TOKEN'] = "eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJ6eXdjRVdfd2hOSzBTMDJLS3Nxd0Q0cGNjTXJpc1BSUUJDcEo4T0o1Rm40In0.eyJleHAiOjE2ODA2NDExOTEsImlhdCI6MTY4MDYwNTE5MSwiYXV0aF90aW1lIjoxNjgwNjA1MTkxLCJqdGkiOiJjNWU3ZTE0ZC1iOTYwLTQ0ZGUtYTIxMS1lZDYxMWQ1MzcyN2EiLCJpc3MiOiJodHRwczovL2tleWNsb2FrLnNvZnR3YXJlLWRldi5uY3NhLmlsbGlub2lzLmVkdS9yZWFsbXMvbWxmbG93IiwiYXVkIjpbIm1sZmxvdy1kZW1vIiwiYWNjb3VudCJdLCJzdWIiOiIyOTdhM2ExNS02Nzc0LTQ0NDItOGVjNy0zNzBlNmVhNzM2MWIiLCJ0eXAiOiJCZWFyZXIiLCJhenAiOiJtbGZsb3ctZGVtbyIsInNlc3Npb25fc3RhdGUiOiI0NmJjZGE1YS05NTdkLTQ2NmQtYjgyZC0yZTU2MDdiOTQzYTUiLCJzY29wZSI6InByb2ZpbGUgZ3JvdXBzIGVtYWlsIiwic2lkIjoiNDZiY2RhNWEtOTU3ZC00NjZkLWI4MmQtMmU1NjA3Yjk0M2E1IiwiZW1haWxfdmVyaWZpZWQiOnRydWUsIm5hbWUiOiJFbGxpb3R0IEthdWZmbWFuIiwiZ3JvdXBzIjpbIi9ncnBfamlyYV91c2VycyIsIi9zZF9tbGZsb3ciLCIvYWxsX3VzZXJzIiwiL2ppcmEtdXNlcnMiLCIvYWxsX2hwY191c2VyX3NwbyIsIm9mZmxpbmVfYWNjZXNzIiwiZGVmYXVsdC1yb2xlcy1tbGZsb3ciLCJ1bWFfYXV0aG9yaXphdGlvbiJdLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJla2F1ZmZtYSIsImdpdmVuX25hbWUiOiJFbGxpb3R0IiwiZmFtaWx5X25hbWUiOiJLYXVmZm1hbiIsImVtYWlsIjoiZWxtYWthODcwMEBnbWFpbC5jb20ifQ.Dfu46_QioMQuHyvoFlpgXIv6rfBcpEsdCX--yESX0hN-CzeLuWsYqWWxm2r9mPMYKKhp65907kRPmLUOEFy7o3qE9OSDucZVGfc_jve-RLY4FX2fmi0jw3r-9TjRZO3uNwM2yqoqd_6QGOjR4-Flw6QNgi8u3H_PN0Jh_aswWK46BBbktQrRQsK-aNK-Hj3K3la_FK4fJPObOeX8F2MkepbJoVxZcvXXLaSndaR0vcN1OeAxiFAaHtV-aVu53AmRF7TyizNk9SYZLzZOhzu0yIgr0K-duEd_QTgIKjX_7DZ2VHmDBBigWMbXgsjN06NgXHi7nWqBAdHABd9zFKYHjw"
     os.environ['MLFLOW_TRACKING_URI'] = "https://mlflow-demo.software-dev.ncsa.illinois.edu"
     
     mlflow.set_tracking_uri('https://mlflow-demo.software-dev.ncsa.illinois.edu') 
@@ -1169,8 +1037,8 @@ if USE_DASK_ML:
     
     futures = client.map(fit_model,
                          samples_even, 
-                         features=features_even[:120000], 
-                         labels=labels_even[:120000],
+                         features=features_even, 
+                         labels=labels_even,
                          evaluation_matrix=evaluation_matrix,
                          n_folds=N_FOLD,
                          N_FEATURES=N_FEATURES,
@@ -1189,8 +1057,8 @@ else:
         print(i)
         print(samples_even[i])
         res.append(fit_model(samples_even[i], 
-                             features=features_even[:120000],
-                             labels=labels_even[:120000], 
+                             features=features_even,
+                             labels=labels_even, 
                              evaluation_matrix=evaluation_matrix,
                              n_folds=N_FOLD,
                              N_FEATURES=N_FEATURES,
@@ -1220,7 +1088,7 @@ if MODEL_LOGGING:
 else:
     best_model_even = res[np.argmax(scores)]["full_result"]["model"]
     
-best_model_even.save_model("models/model_230324_even.model")
+best_model_even.save_model("models/model_230404_even.model")
 
 # %% tags=[]
 if USE_DASK_ML:
@@ -1231,8 +1099,8 @@ if USE_DASK_ML:
     
     futures = client.map(fit_model,
                          samples_odd, 
-                         features=features_odd[:60000], 
-                         labels=labels_odd[:60000],
+                         features=features_odd, 
+                         labels=labels_odd,
                          evaluation_matrix=evaluation_matrix,
                          n_folds=N_FOLD,
                          N_FEATURES=N_FEATURES,
@@ -1251,8 +1119,8 @@ else:
         print(i)
         print(samples_odd[i])
         res.append(fit_model(samples_odd[i], 
-                             features=features_odd[:60000],
-                             labels=labels_odd[:60000], 
+                             features=features_odd,
+                             labels=labels_odd, 
                              evaluation_matrix=evaluation_matrix,
                              n_folds=N_FOLD,
                              N_FEATURES=N_FEATURES,
@@ -1282,7 +1150,7 @@ if MODEL_LOGGING:
 else:
     best_model_odd = res[np.argmax(scores)]["full_result"]["model"]
     
-best_model_odd.save_model("models/model_230324_odd.model")
+best_model_odd.save_model("models/model_230404_odd.model")
 
 # %% [markdown]
 # # Evaluation with Optimized Model
@@ -1409,7 +1277,13 @@ print("Training Jet Score = ", score)
 # ### mbjj test (Compare BDT output to previous method)
 
 # %%
-output = pickle.load(open("output_temp4.p", "rb"))
+best_model_even = XGBClassifier()
+best_model_even.load_model("models/model_230404_even.model")
+best_model_odd = XGBClassifier()
+best_model_odd.load_model("models/model_230404_odd.model")
+
+# %%
+output = pickle.load(open("output_temp5.p", "rb"))
 
 # %%
 # grab features and labels and convert to np array
@@ -1417,19 +1291,26 @@ features = output['features'].value
 labels = output['labels'].value
 even = output['even'].value
 observable = output['observable'].value
-
-labels = labels.reshape((len(labels),))
 even = np.repeat(even, 12)
 
 # %%
-power = PowerTransformer(method='yeo-johnson', standardize=True)
-features_preprocessed = power.fit_transform(features)
+features_even = features[even]
+labels_even = labels[even]
+features_odd = features[np.invert(even)]
+labels_odd = labels[np.invert(even)]
+
+labels_even = labels_even.reshape((len(labels_even),))
+labels_odd = labels_odd.reshape((len(labels_odd),))
 
 # %%
-features_reshaped = features.reshape((int(len(features)/12),12,N_FEATURES))
-top_mass_candidates = features_reshaped[:,:,10]
+features_even_reshaped = features_even.reshape((int(len(features_even)/12),12,N_FEATURES))
+top_mass_candidates_even = features_even_reshaped[:,:,6]
+features_odd_reshaped = features_odd.reshape((int(len(features_odd)/12),12,N_FEATURES))
+top_mass_candidates_odd = features_odd_reshaped[:,:,6]
+
 observable_list = observable.astype(np.float32).tolist()
-all_correct_top_mass = features[labels==1,10]
+all_correct_top_mass_even = features_even[labels_even==1,6]
+all_correct_top_mass_odd = features_odd[labels_odd==1,6]
 
 # %%
 #### mass histogram ####
@@ -1449,26 +1330,39 @@ h = hist.Hist(
 )
 
 # fill histogram
-h.fill(combinedmass = all_correct_top_mass, truthlabel="Truth")
+h.fill(combinedmass = all_correct_top_mass_even, truthlabel="Truth")
+h.fill(combinedmass = all_correct_top_mass_odd, truthlabel="Truth")
 h.fill(combinedmass = observable_list, truthlabel="Jet Triplet with Largest pT")
 
 # %%
-predictions = best_model_even.predict_proba(features_preprocessed)[:,0]
+# fill in odd predictions
+predictions = best_model_even.predict_proba(features_odd)[:,0]
 predictions = predictions.reshape((int(len(predictions)/12),12))
 which_combination = np.argmin(predictions,axis=-1)
     
-top_mass = np.zeros(features_reshaped.shape[0])
-for j in range(len(top_mass)):
-    top_mass[j] = top_mass_candidates[j,which_combination[j]]
+top_mass_odd = np.zeros(features_odd_reshaped.shape[0])
+for j in range(len(top_mass_odd)):
+    top_mass_odd[j] = top_mass_candidates_odd[j,which_combination[j]]
         
-h.fill(combinedmass = top_mass, truthlabel="BDT")
+h.fill(combinedmass = top_mass_odd, truthlabel="BDT")
+
+# fill in even predictions
+predictions = best_model_odd.predict_proba(features_even)[:,0]
+predictions = predictions.reshape((int(len(predictions)/12),12))
+which_combination = np.argmin(predictions,axis=-1)
+    
+top_mass_even = np.zeros(features_even_reshaped.shape[0])
+for j in range(len(top_mass_even)):
+    top_mass_even[j] = top_mass_candidates_even[j,which_combination[j]]
+        
+h.fill(combinedmass = top_mass_even, truthlabel="BDT")
 
 # %%
 fig,ax = plt.subplots(1,1,figsize=(8,8))
 h.plot(ax=ax)
 ax.legend(legendlist)
 ax.set_title("Reconstructed Top Mass")
-ax.set_xlim([80,400])
+ax.set_xlim([80,500])
 fig.show()
 
 # %%

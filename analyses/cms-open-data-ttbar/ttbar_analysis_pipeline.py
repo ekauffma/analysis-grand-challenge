@@ -115,7 +115,7 @@ AF = "coffea_casa"
 ### BENCHMARKING-SPECIFIC SETTINGS
 
 # chunk size to use
-CHUNKSIZE = 200_000
+CHUNKSIZE = 300_000
 
 # metadata to propagate through to metrics
 AF_NAME = "coffea_casa"  # "ssl-dev" allows for the switch to local data on /data
@@ -404,10 +404,12 @@ class TtbarAnalysis(processor.ProcessorABC):
             ### event selection
             # very very loosely based on https://arxiv.org/abs/2006.13076
 
-            # pT > 25 GeV for leptons & jets
-            selected_electrons = events.Electron[(events.Electron.pt>25)]
-            selected_muons = events.Muon[(events.Muon.pt >25)]
-            jet_filter = (events.Jet.pt * events[pt_var]) > 25
+            # filter electrons, muons, and jets
+            selected_electrons = events.Electron[(events.Electron.pt > 30) & (np.abs(events.Electron.eta)<2.1) & 
+                                                 (events.Electron.cutBased==4) & (events.Electron.sip3d < 4)]
+            selected_muons = events.Muon[(events.Muon.pt > 30) & (np.abs(events.Muon.eta)<2.1) & (events.Muon.tightId) & 
+                                         (events.Muon.sip3d < 4) & (events.Muon.pfRelIso04_all < 0.15)]
+            jet_filter = (events.Jet.pt > 30) & (np.abs(events.Jet.eta) < 2.4) & (events.Jet.isTightLeptonVeto)
             selected_jets = events.Jet[jet_filter]
             even = (events.event%2==0)
 
@@ -431,6 +433,8 @@ class TtbarAnalysis(processor.ProcessorABC):
                 # further filtering: 4j1b CR with single b-tag, 4j2b SR with two or more tags
                 if region == "4j1b":
                     region_filter = ak.sum(selected_jets.btagCSVV2 >= B_TAG_THRESHOLD, axis=1) == 1
+                    if sum(region_filter)==0: continue # move on if no events pass
+                    
                     selected_jets_region = selected_jets[region_filter]
                     even_region = even[region_filter]
                     
@@ -445,6 +449,8 @@ class TtbarAnalysis(processor.ProcessorABC):
 
                 elif region == "4j2b":
                     region_filter = ak.sum(selected_jets.btagCSVV2 > B_TAG_THRESHOLD, axis=1) >= 2
+                    if sum(region_filter)==0: continue # move on if no events pass
+                    
                     selected_jets_region = selected_jets[region_filter]
                     selected_electrons_region = selected_electrons[region_filter]
                     selected_muons_region = selected_muons[region_filter]
@@ -472,29 +478,35 @@ class TtbarAnalysis(processor.ProcessorABC):
                         results = np.zeros(features.shape[0])
                         output = grpcclient.InferRequestedOutput(output_name)
                         
-                        inpt = [grpcclient.InferInput(input_name, features[even_perm].shape, dtype)]
-                        inpt[0].set_data_from_numpy(features[even_perm])
-                        results[even_region]=triton_client.infer(
-                            model_name=self.model_name, 
-                            model_version=self.model_version_even,
-                            inputs=inpt, 
-                            outputs=[output]
-                        ).as_numpy(output_name)[:, 1]
+                        if len(features[even_perm])>0:
+                            inpt = [grpcclient.InferInput(input_name, features[even_perm].shape, dtype)]
+                            inpt[0].set_data_from_numpy(features[even_perm])
+                            results[even_region]=triton_client.infer(
+                                model_name=self.model_name, 
+                                model_version=self.model_version_even,
+                                inputs=inpt, 
+                                outputs=[output]
+                            ).as_numpy(output_name)[:, 1]
                         
-                        inpt = [grpcclient.InferInput(input_name, features[np.invert(even_perm)].shape, dtype)]
-                        inpt[0].set_data_from_numpy(features[np.invert(even_perm)])
-                        results[np.invert(even_region)]=triton_client.infer(
-                            model_name=self.model_name, 
-                            model_version=self.model_version_odd,
-                            inputs=inpt, 
-                            outputs=[output]
-                        ).as_numpy(output_name)[:, 1]
+                        if len(features[np.invert(even_perm)])>0:
+                            inpt = [grpcclient.InferInput(input_name, features[np.invert(even_perm)].shape, dtype)]
+                            inpt[0].set_data_from_numpy(features[np.invert(even_perm)])
+                            results[np.invert(even_region)]=triton_client.infer(
+                                model_name=self.model_name, 
+                                model_version=self.model_version_odd,
+                                inputs=inpt, 
+                                outputs=[output]
+                            ).as_numpy(output_name)[:, 1]
                     
                     else:
                         
                         results = np.zeros(features.shape[0])
-                        results[even_perm] = self.xgboost_model_even.predict_proba(features[even_perm,:])[:, 1]
-                        results[np.invert(even_perm)] = results_odd = self.xgboost_model_odd.predict_proba(features[np.invert(even_perm),:])[:, 1]
+                        if len(features[even_perm])>0:
+                            results[even_perm] = self.xgboost_model_even.predict_proba(
+                                features[even_perm,:])[:, 1]
+                        if len(features[np.invert(even_perm)])>0:
+                            results[np.invert(even_perm)] = results_odd = self.xgboost_model_odd.predict_proba(
+                                features[np.invert(even_perm),:])[:, 1]
                         
                     results = ak.unflatten(results, perm_counts)
                     which_combination = ak.argmax(results,axis=1)

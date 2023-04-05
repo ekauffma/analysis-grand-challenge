@@ -329,12 +329,12 @@ class JetClassifier(processor_base):
         pt_variations = ["pt_nominal"] if variation == "nominal" else ["pt_nominal"]
         for pt_var in pt_variations:
             
-            # filter electrons, muons, and jets by pT
+            # filter electrons, muons, and jets
             selected_electrons = events.Electron[(events.Electron.pt > 30) & (np.abs(events.Electron.eta)<2.1) & 
                                                  (events.Electron.cutBased==4) & (events.Electron.sip3d < 4)]
             selected_muons = events.Muon[(events.Muon.pt > 30) & (np.abs(events.Muon.eta)<2.1) & (events.Muon.tightId) & 
                                          (events.Muon.sip3d < 4) & (events.Muon.pfRelIso04_all < 0.15)]
-            jet_filter = (events.Jet.pt > 30) & (np.abs(events.Jet.eta) < 2.4)
+            jet_filter = (events.Jet.pt > 30) & (np.abs(events.Jet.eta) < 2.4) & (events.Jet.isTightLeptonVeto)
             selected_jets = events.Jet[jet_filter]
             selected_genpart = events.GenPart
             even = (events.event%2==0)
@@ -806,7 +806,7 @@ print("features_odd.shape = ", features_odd.shape)
 # set up trials
 if USE_MLFLOW:
     
-    os.environ['MLFLOW_TRACKING_TOKEN'] = "eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJ6eXdjRVdfd2hOSzBTMDJLS3Nxd0Q0cGNjTXJpc1BSUUJDcEo4T0o1Rm40In0.eyJleHAiOjE2ODA2NDExOTEsImlhdCI6MTY4MDYwNTE5MSwiYXV0aF90aW1lIjoxNjgwNjA1MTkxLCJqdGkiOiJjNWU3ZTE0ZC1iOTYwLTQ0ZGUtYTIxMS1lZDYxMWQ1MzcyN2EiLCJpc3MiOiJodHRwczovL2tleWNsb2FrLnNvZnR3YXJlLWRldi5uY3NhLmlsbGlub2lzLmVkdS9yZWFsbXMvbWxmbG93IiwiYXVkIjpbIm1sZmxvdy1kZW1vIiwiYWNjb3VudCJdLCJzdWIiOiIyOTdhM2ExNS02Nzc0LTQ0NDItOGVjNy0zNzBlNmVhNzM2MWIiLCJ0eXAiOiJCZWFyZXIiLCJhenAiOiJtbGZsb3ctZGVtbyIsInNlc3Npb25fc3RhdGUiOiI0NmJjZGE1YS05NTdkLTQ2NmQtYjgyZC0yZTU2MDdiOTQzYTUiLCJzY29wZSI6InByb2ZpbGUgZ3JvdXBzIGVtYWlsIiwic2lkIjoiNDZiY2RhNWEtOTU3ZC00NjZkLWI4MmQtMmU1NjA3Yjk0M2E1IiwiZW1haWxfdmVyaWZpZWQiOnRydWUsIm5hbWUiOiJFbGxpb3R0IEthdWZmbWFuIiwiZ3JvdXBzIjpbIi9ncnBfamlyYV91c2VycyIsIi9zZF9tbGZsb3ciLCIvYWxsX3VzZXJzIiwiL2ppcmEtdXNlcnMiLCIvYWxsX2hwY191c2VyX3NwbyIsIm9mZmxpbmVfYWNjZXNzIiwiZGVmYXVsdC1yb2xlcy1tbGZsb3ciLCJ1bWFfYXV0aG9yaXphdGlvbiJdLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJla2F1ZmZtYSIsImdpdmVuX25hbWUiOiJFbGxpb3R0IiwiZmFtaWx5X25hbWUiOiJLYXVmZm1hbiIsImVtYWlsIjoiZWxtYWthODcwMEBnbWFpbC5jb20ifQ.Dfu46_QioMQuHyvoFlpgXIv6rfBcpEsdCX--yESX0hN-CzeLuWsYqWWxm2r9mPMYKKhp65907kRPmLUOEFy7o3qE9OSDucZVGfc_jve-RLY4FX2fmi0jw3r-9TjRZO3uNwM2yqoqd_6QGOjR4-Flw6QNgi8u3H_PN0Jh_aswWK46BBbktQrRQsK-aNK-Hj3K3la_FK4fJPObOeX8F2MkepbJoVxZcvXXLaSndaR0vcN1OeAxiFAaHtV-aVu53AmRF7TyizNk9SYZLzZOhzu0yIgr0K-duEd_QTgIKjX_7DZ2VHmDBBigWMbXgsjN06NgXHi7nWqBAdHABd9zFKYHjw"
+    os.environ['MLFLOW_TRACKING_TOKEN'] = "eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJ6eXdjRVdfd2hOSzBTMDJLS3Nxd0Q0cGNjTXJpc1BSUUJDcEo4T0o1Rm40In0.eyJleHAiOjE2ODA3MzQzMTgsImlhdCI6MTY4MDY5ODMyMiwiYXV0aF90aW1lIjoxNjgwNjk4MzE4LCJqdGkiOiI5YjZlY2YxNy0xY2Q2LTRiMDctYWM5MS0wZjZlOTc0ODcwMmEiLCJpc3MiOiJodHRwczovL2tleWNsb2FrLnNvZnR3YXJlLWRldi5uY3NhLmlsbGlub2lzLmVkdS9yZWFsbXMvbWxmbG93IiwiYXVkIjpbIm1sZmxvdy1kZW1vIiwiYWNjb3VudCJdLCJzdWIiOiIyOTdhM2ExNS02Nzc0LTQ0NDItOGVjNy0zNzBlNmVhNzM2MWIiLCJ0eXAiOiJCZWFyZXIiLCJhenAiOiJtbGZsb3ctZGVtbyIsInNlc3Npb25fc3RhdGUiOiJhN2ZkYTAxNy05MWI3LTQwYjUtOTAwMS1mNjlmZjVhM2NkY2QiLCJzY29wZSI6InByb2ZpbGUgZ3JvdXBzIGVtYWlsIiwic2lkIjoiYTdmZGEwMTctOTFiNy00MGI1LTkwMDEtZjY5ZmY1YTNjZGNkIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsIm5hbWUiOiJFbGxpb3R0IEthdWZmbWFuIiwiZ3JvdXBzIjpbIi9ncnBfamlyYV91c2VycyIsIi9zZF9tbGZsb3ciLCIvYWxsX3VzZXJzIiwiL2ppcmEtdXNlcnMiLCIvYWxsX2hwY191c2VyX3NwbyIsIm9mZmxpbmVfYWNjZXNzIiwiZGVmYXVsdC1yb2xlcy1tbGZsb3ciLCJ1bWFfYXV0aG9yaXphdGlvbiJdLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJla2F1ZmZtYSIsImdpdmVuX25hbWUiOiJFbGxpb3R0IiwiZmFtaWx5X25hbWUiOiJLYXVmZm1hbiIsImVtYWlsIjoiZWxtYWthODcwMEBnbWFpbC5jb20ifQ.CufX8VLuC5o5UfdpXks_xJJLCyY_thcjmn6aqNcAoX0J1P9azA6fNjb1raGcLkSegzM-N_e44yyK3b4i3woVeXJ-oSsT6k9OZR6Cz-7DVeajonsSaZ4pYzMNkffcQyOgcZ2pWvx-niYblqHxObZQbdPa7WPxAaeU419q-YOgLxBO9boS7BHBgXLHsoGamK1JE9mFEXudAmq13pg7JvhSzehOeyPEkqceL9IHOcyBxL80OHp4s1ygfC1qmhXF3MIfs0WdJaBLF0nm_tWPvgQ5nblzdPOP8ompvYrzI4cOJJjMxzPBp2mw5BKnuSRGSzR6IT2eUzxtyLzZLKK6iysz_Q"
     os.environ['MLFLOW_TRACKING_URI'] = "https://mlflow-demo.software-dev.ncsa.illinois.edu"
     
     mlflow.set_tracking_uri('https://mlflow-demo.software-dev.ncsa.illinois.edu') 
@@ -1019,7 +1019,7 @@ def fit_model(params,
 # function to provide necessary environment variables to workers
 def initialize_mlflow(): 
     
-    os.environ['MLFLOW_TRACKING_TOKEN'] = "eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJ6eXdjRVdfd2hOSzBTMDJLS3Nxd0Q0cGNjTXJpc1BSUUJDcEo4T0o1Rm40In0.eyJleHAiOjE2ODA2NDExOTEsImlhdCI6MTY4MDYwNTE5MSwiYXV0aF90aW1lIjoxNjgwNjA1MTkxLCJqdGkiOiJjNWU3ZTE0ZC1iOTYwLTQ0ZGUtYTIxMS1lZDYxMWQ1MzcyN2EiLCJpc3MiOiJodHRwczovL2tleWNsb2FrLnNvZnR3YXJlLWRldi5uY3NhLmlsbGlub2lzLmVkdS9yZWFsbXMvbWxmbG93IiwiYXVkIjpbIm1sZmxvdy1kZW1vIiwiYWNjb3VudCJdLCJzdWIiOiIyOTdhM2ExNS02Nzc0LTQ0NDItOGVjNy0zNzBlNmVhNzM2MWIiLCJ0eXAiOiJCZWFyZXIiLCJhenAiOiJtbGZsb3ctZGVtbyIsInNlc3Npb25fc3RhdGUiOiI0NmJjZGE1YS05NTdkLTQ2NmQtYjgyZC0yZTU2MDdiOTQzYTUiLCJzY29wZSI6InByb2ZpbGUgZ3JvdXBzIGVtYWlsIiwic2lkIjoiNDZiY2RhNWEtOTU3ZC00NjZkLWI4MmQtMmU1NjA3Yjk0M2E1IiwiZW1haWxfdmVyaWZpZWQiOnRydWUsIm5hbWUiOiJFbGxpb3R0IEthdWZmbWFuIiwiZ3JvdXBzIjpbIi9ncnBfamlyYV91c2VycyIsIi9zZF9tbGZsb3ciLCIvYWxsX3VzZXJzIiwiL2ppcmEtdXNlcnMiLCIvYWxsX2hwY191c2VyX3NwbyIsIm9mZmxpbmVfYWNjZXNzIiwiZGVmYXVsdC1yb2xlcy1tbGZsb3ciLCJ1bWFfYXV0aG9yaXphdGlvbiJdLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJla2F1ZmZtYSIsImdpdmVuX25hbWUiOiJFbGxpb3R0IiwiZmFtaWx5X25hbWUiOiJLYXVmZm1hbiIsImVtYWlsIjoiZWxtYWthODcwMEBnbWFpbC5jb20ifQ.Dfu46_QioMQuHyvoFlpgXIv6rfBcpEsdCX--yESX0hN-CzeLuWsYqWWxm2r9mPMYKKhp65907kRPmLUOEFy7o3qE9OSDucZVGfc_jve-RLY4FX2fmi0jw3r-9TjRZO3uNwM2yqoqd_6QGOjR4-Flw6QNgi8u3H_PN0Jh_aswWK46BBbktQrRQsK-aNK-Hj3K3la_FK4fJPObOeX8F2MkepbJoVxZcvXXLaSndaR0vcN1OeAxiFAaHtV-aVu53AmRF7TyizNk9SYZLzZOhzu0yIgr0K-duEd_QTgIKjX_7DZ2VHmDBBigWMbXgsjN06NgXHi7nWqBAdHABd9zFKYHjw"
+    os.environ['MLFLOW_TRACKING_TOKEN'] = "eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJ6eXdjRVdfd2hOSzBTMDJLS3Nxd0Q0cGNjTXJpc1BSUUJDcEo4T0o1Rm40In0.eyJleHAiOjE2ODA3MzQzMTgsImlhdCI6MTY4MDY5ODMyMiwiYXV0aF90aW1lIjoxNjgwNjk4MzE4LCJqdGkiOiI5YjZlY2YxNy0xY2Q2LTRiMDctYWM5MS0wZjZlOTc0ODcwMmEiLCJpc3MiOiJodHRwczovL2tleWNsb2FrLnNvZnR3YXJlLWRldi5uY3NhLmlsbGlub2lzLmVkdS9yZWFsbXMvbWxmbG93IiwiYXVkIjpbIm1sZmxvdy1kZW1vIiwiYWNjb3VudCJdLCJzdWIiOiIyOTdhM2ExNS02Nzc0LTQ0NDItOGVjNy0zNzBlNmVhNzM2MWIiLCJ0eXAiOiJCZWFyZXIiLCJhenAiOiJtbGZsb3ctZGVtbyIsInNlc3Npb25fc3RhdGUiOiJhN2ZkYTAxNy05MWI3LTQwYjUtOTAwMS1mNjlmZjVhM2NkY2QiLCJzY29wZSI6InByb2ZpbGUgZ3JvdXBzIGVtYWlsIiwic2lkIjoiYTdmZGEwMTctOTFiNy00MGI1LTkwMDEtZjY5ZmY1YTNjZGNkIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsIm5hbWUiOiJFbGxpb3R0IEthdWZmbWFuIiwiZ3JvdXBzIjpbIi9ncnBfamlyYV91c2VycyIsIi9zZF9tbGZsb3ciLCIvYWxsX3VzZXJzIiwiL2ppcmEtdXNlcnMiLCIvYWxsX2hwY191c2VyX3NwbyIsIm9mZmxpbmVfYWNjZXNzIiwiZGVmYXVsdC1yb2xlcy1tbGZsb3ciLCJ1bWFfYXV0aG9yaXphdGlvbiJdLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJla2F1ZmZtYSIsImdpdmVuX25hbWUiOiJFbGxpb3R0IiwiZmFtaWx5X25hbWUiOiJLYXVmZm1hbiIsImVtYWlsIjoiZWxtYWthODcwMEBnbWFpbC5jb20ifQ.CufX8VLuC5o5UfdpXks_xJJLCyY_thcjmn6aqNcAoX0J1P9azA6fNjb1raGcLkSegzM-N_e44yyK3b4i3woVeXJ-oSsT6k9OZR6Cz-7DVeajonsSaZ4pYzMNkffcQyOgcZ2pWvx-niYblqHxObZQbdPa7WPxAaeU419q-YOgLxBO9boS7BHBgXLHsoGamK1JE9mFEXudAmq13pg7JvhSzehOeyPEkqceL9IHOcyBxL80OHp4s1ygfC1qmhXF3MIfs0WdJaBLF0nm_tWPvgQ5nblzdPOP8ompvYrzI4cOJJjMxzPBp2mw5BKnuSRGSzR6IT2eUzxtyLzZLKK6iysz_Q"
     os.environ['MLFLOW_TRACKING_URI'] = "https://mlflow-demo.software-dev.ncsa.illinois.edu"
     
     mlflow.set_tracking_uri('https://mlflow-demo.software-dev.ncsa.illinois.edu') 
@@ -1088,7 +1088,7 @@ if MODEL_LOGGING:
 else:
     best_model_even = res[np.argmax(scores)]["full_result"]["model"]
     
-best_model_even.save_model("models/model_230404_even.model")
+best_model_even.save_model("models/model_230405_even.model")
 
 # %% tags=[]
 if USE_DASK_ML:
@@ -1140,7 +1140,7 @@ best_parameters_odd
 
 # %% tags=[]
 if MODEL_LOGGING:
-    best_run_id = samples_even[np.argmax(scores)]["run_id"]
+    best_run_id = samples_odd[np.argmax(scores)]["run_id"]
     best_model_path = f'runs:/{best_run_id}/model'
     best_model_odd = mlflow.xgboost.load_model(best_model_path)
     
@@ -1150,7 +1150,7 @@ if MODEL_LOGGING:
 else:
     best_model_odd = res[np.argmax(scores)]["full_result"]["model"]
     
-best_model_odd.save_model("models/model_230404_odd.model")
+best_model_odd.save_model("models/model_230405_odd.model")
 
 # %% [markdown]
 # # Evaluation with Optimized Model
@@ -1278,9 +1278,9 @@ print("Training Jet Score = ", score)
 
 # %%
 best_model_even = XGBClassifier()
-best_model_even.load_model("models/model_230404_even.model")
+best_model_even.load_model("models/model_230405_even.model")
 best_model_odd = XGBClassifier()
-best_model_odd.load_model("models/model_230404_odd.model")
+best_model_odd.load_model("models/model_230405_odd.model")
 
 # %%
 output = pickle.load(open("output_temp5.p", "rb"))

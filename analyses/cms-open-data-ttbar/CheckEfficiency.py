@@ -1,11 +1,11 @@
 # ---
 # jupyter:
 #   jupytext:
-#     formats: ipynb,py:percent
+#     formats: ipynb,py
 #     text_representation:
 #       extension: .py
-#       format_name: percent
-#       format_version: '1.3'
+#       format_name: light
+#       format_version: '1.5'
 #       jupytext_version: 1.14.1
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
@@ -13,12 +13,11 @@
 #     name: python3
 # ---
 
-# %% [markdown]
 # # Investigate BDT Performance
 #
 # The purpose of this notebook is to evaluate the performance of the BDT/combinatorics approach to reconstructing ttbar events. To reiterate, the strategy is to pass all possible permutations of jet assignments into the BDT and choose the result with the highest BDT score. Each permutation has four assignments: two jets are assigned to W, one jet is assigned to top1 (the top on the side of hadronic decay), and one jet is assigned to top2 (the top on the side of leptonic decay). Calculating every permutation is quite expensive as far as memory and time, so one purpose of this investigate is to find an appropriate cutoff for `MAX_N_JETS` (the maximum number of jets we consider for permutations in each event, where jets are ordered according to their $p_T$.
 
-# %%
+# +
 ## IMPORTS
 import os
 import time
@@ -31,12 +30,11 @@ import uproot
 from coffea.nanoevents import NanoEventsFactory
 import awkward as ak
 
-from sklearn.preprocessing import PowerTransformer
 import xgboost as xgb
 
 import utils
 
-# %%
+# +
 DICT_MAX = 7 # maximum permutation number to include in dictionaries
 
 # calculate the dictionary of permutations for each number of jets
@@ -87,7 +85,7 @@ for n in range(4,DICT_MAX+1):
     permutations_dict[n] = np.array(permutations_dict[n])[res].tolist()
     print("number of permutations for n=",n,": ", len(permutations_dict[n]))
 
-# %%
+# +
 # these matrices tell you the overlap between the predicted label (rows) and truth label (columns)
 # the "score" in each matrix entry is the number of jets which are assigned correctly
 evaluation_matrices = {} # overall event score
@@ -120,7 +118,8 @@ for n in range(4,DICT_MAX+1):
     evaluation_matrices_top1[n] = evaluation_matrix_top1
 
 
-# %%
+# -
+
 ## get inputs to BDT
 def get_features(jets, electrons, muons, permutations_dict):
     '''
@@ -146,78 +145,76 @@ def get_features(jets, electrons, muons, permutations_dict):
     
     
     #### calculate features ####
+    #### calculate features ####
     features = np.zeros((sum(perm_counts),20))
     
     # grab lepton info
     leptons = ak.flatten(ak.concatenate((electrons, muons),axis=1),axis=-1)
 
+    feature_count = 0
+    
     # delta R between top1 and lepton
     features[:,0] = ak.flatten(np.sqrt((leptons.eta - jets[perms[...,3]].eta)**2 + 
                                        (leptons.phi - jets[perms[...,3]].phi)**2)).to_numpy()
 
-    # delta R between the two W
+    
+    #delta R between the two W
     features[:,1] = ak.flatten(np.sqrt((jets[perms[...,0]].eta - jets[perms[...,1]].eta)**2 + 
                                        (jets[perms[...,0]].phi - jets[perms[...,1]].phi)**2)).to_numpy()
 
-    # delta R between W and top2
+    #delta R between W and top2
     features[:,2] = ak.flatten(np.sqrt((jets[perms[...,0]].eta - jets[perms[...,2]].eta)**2 + 
                                        (jets[perms[...,0]].phi - jets[perms[...,2]].phi)**2)).to_numpy()
     features[:,3] = ak.flatten(np.sqrt((jets[perms[...,1]].eta - jets[perms[...,2]].eta)**2 + 
                                        (jets[perms[...,1]].phi - jets[perms[...,2]].phi)**2)).to_numpy()
 
-    # delta phi between top1 and lepton
-    features[:,4] = ak.flatten(np.abs(leptons.phi - jets[perms[...,3]].phi)).to_numpy()
-
-    # delta phi between the two W
-    features[:,5] = ak.flatten(np.abs(jets[perms[...,0]].phi - jets[perms[...,1]].phi)).to_numpy()
-
-    # delta phi between W and top2
-    features[:,6] = ak.flatten(np.abs(jets[perms[...,0]].phi - jets[perms[...,2]].phi)).to_numpy()
-    features[:,7] = ak.flatten(np.abs(jets[perms[...,1]].phi - jets[perms[...,2]].phi)).to_numpy()
-
-
     # combined mass of top1 and lepton
-    features[:,8] = ak.flatten((leptons + jets[perms[...,3]]).mass).to_numpy()
+    features[:,4] = ak.flatten((leptons + jets[perms[...,3]]).mass).to_numpy()
 
     # combined mass of W
-    features[:,9] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]]).mass).to_numpy()
+    features[:,5] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]]).mass).to_numpy()
 
     # combined mass of W and top2
-    features[:,10] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
+    features[:,6] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
                                  jets[perms[...,2]]).mass).to_numpy()
     
-    # combined mass of W and top2
-    features[:,11] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
+    feature_count+=1
+    # combined pT of W and top2
+    features[:,7] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
                                  jets[perms[...,2]]).pt).to_numpy()
 
 
     # pt of every jet
-    features[:,12] = ak.flatten(jets[perms[...,0]].pt).to_numpy()
-    features[:,13] = ak.flatten(jets[perms[...,1]].pt).to_numpy()
-    features[:,14] = ak.flatten(jets[perms[...,2]].pt).to_numpy()
-    features[:,15] = ak.flatten(jets[perms[...,3]].pt).to_numpy()
+    features[:,8] = ak.flatten(jets[perms[...,0]].pt).to_numpy()
+    features[:,9] = ak.flatten(jets[perms[...,1]].pt).to_numpy()
+    features[:,10] = ak.flatten(jets[perms[...,2]].pt).to_numpy()
+    features[:,11] = ak.flatten(jets[perms[...,3]].pt).to_numpy()
 
-
-    # mass of every jet
-    features[:,16] = ak.flatten(jets[perms[...,0]].mass).to_numpy()
-    features[:,17] = ak.flatten(jets[perms[...,1]].mass).to_numpy()
-    features[:,18] = ak.flatten(jets[perms[...,2]].mass).to_numpy()
-    features[:,19] = ak.flatten(jets[perms[...,3]].mass).to_numpy()
+    # btagCSVV2 of every jet
+    features[:,12] = ak.flatten(jets[perms[...,0]].btagCSVV2).to_numpy()
+    features[:,13] = ak.flatten(jets[perms[...,1]].btagCSVV2).to_numpy()
+    features[:,14] = ak.flatten(jets[perms[...,2]].btagCSVV2).to_numpy()
+    features[:,15] = ak.flatten(jets[perms[...,3]].btagCSVV2).to_numpy()
+    
+    # qgl of every jet
+    features[:,16] = ak.flatten(jets[perms[...,0]].qgl).to_numpy()
+    features[:,17] = ak.flatten(jets[perms[...,1]].qgl).to_numpy()
+    features[:,18] = ak.flatten(jets[perms[...,2]].qgl).to_numpy()
+    features[:,19] = ak.flatten(jets[perms[...,3]].qgl).to_numpy()
 
     return features, perm_counts
 
 
-# %%
-def filterEvents(jets, electrons, muons, genpart, nmin, nmax, reconstructable=True):
+def filterEvents(jets, electrons, muons, genpart, even, nmin, nmax, reconstructable=True):
 
     
-    selected_electrons = electrons[electrons.pt > 25]
-    # selected_electrons = electrons[(electrons.pt > 30) & (np.abs(electrons.eta)<2.1) & (electrons.sip3d < 4) & (electrons.cutBased==4)]
-    selected_muons = muons[muons.pt > 25]
-    # selected_muons = events.Muon[(muons.pt > 30) & (np.abs(muons.eta)<2.1) & (muons.tightId) & 
-    #                              (muons.sip3d < 4) & (muons.pfRelIso04_all < 0.15)]
-    jet_filter = (jets.pt > 25)
-    # jet_filter = (jets.pt > 30) & (np.abs(jets.eta) < 2.4)
+    # selected_electrons = electrons[electrons.pt > 25]
+    selected_electrons = electrons[(electrons.pt > 30) & (np.abs(electrons.eta)<2.1) & (electrons.sip3d < 4) & (electrons.cutBased==4)]
+    # selected_muons = muons[muons.pt > 25]
+    selected_muons = events.Muon[(muons.pt > 30) & (np.abs(muons.eta)<2.1) & (muons.tightId) & 
+                                 (muons.sip3d < 4) & (muons.pfRelIso04_all < 0.15)]
+    # jet_filter = (jets.pt > 25)
+    jet_filter = (jets.pt > 30) & (np.abs(jets.eta) < 2.4)
     selected_jets = jets[jet_filter]
 
     # single lepton requirement
@@ -235,6 +232,7 @@ def filterEvents(jets, electrons, muons, genpart, nmin, nmax, reconstructable=Tr
     selected_muons = selected_muons[event_filters]
     selected_jets = selected_jets[event_filters]
     selected_genpart = genpart[event_filters]
+    selected_even = even[event_filters]
 
     ### only consider 4j2b region
     region_filter = ak.sum(selected_jets.btagCSVV2 > B_TAG_THRESHOLD, axis=1) >= 2
@@ -245,6 +243,7 @@ def filterEvents(jets, electrons, muons, genpart, nmin, nmax, reconstructable=Tr
     selected_electrons_region = selected_electrons[region_filter]
     selected_muons_region = selected_muons[region_filter]
     selected_genpart_region = selected_genpart[region_filter]
+    selected_even_region = selected_even[region_filter]
     
     
     #### filter genPart to valid matching candidates ####
@@ -308,58 +307,34 @@ def filterEvents(jets, electrons, muons, genpart, nmin, nmax, reconstructable=Tr
         selected_electrons_region = selected_electrons_region[training_event_filter]
         selected_muons_region = selected_muons_region[training_event_filter]
         labels = labels[training_event_filter]
+        selected_even_region = selected_even_region[training_event_filter]
     
-    return selected_jets_region, selected_electrons_region, selected_muons_region, labels
+    return selected_jets_region, selected_electrons_region, selected_muons_region, selected_even_region, labels
 
-# %%
 # load model
-model = xgb.XGBClassifier()
-model.load_model("models/testmodel_10.model")
+model_even = xgb.XGBClassifier()
+model_even.load_model("models/model_230405_even.model")
+model_odd = xgb.XGBClassifier()
+model_odd.load_model("models/model_230405_odd.model")
 
-# %%
 # load data 
-num_events = 100_000
+num_events = 200_000
 events = NanoEventsFactory.from_root("https://xrootd-local.unl.edu:1094//store/user/AGC/nanoAOD/TT_TuneCUETP8M1_13TeV-powheg-pythia8/cmsopendata2015_ttbar_19980_PU25nsData2015v1_76X_mcRun2_asymptotic_v12_ext3-v1_00000_0004.root", 
                                      treepath="Events", entry_stop=num_events).events()
+even = (events.event%2==0)
 
 
-# %%
-model.classes_
-
-# %% [markdown]
 # # Evaluation 1
 #
 # First, we evaluate the performance by restricting the sample of events to those in which it is possible to construct all truth labels.
 
-# %%
 # set the max number of jets to consider for the first part of the study
 MAX_N_JETS = 6
 
-# %%
-### SCORE NOT SEPARATED BY NJET
-for MAX_N_JETS in range(4,10):
-    print("MAX_N_JETS = ", MAX_N_JETS)
-    jets, electrons, muons, labels = filterEvents(events.Jet, events.Electron, events.Muon, events.GenPart, 4, MAX_N_JETS)
-
-    trijet = ak.combinations(jets, 3, fields=["j1", "j2", "j3"])  # trijet candidates
-    trijet_labels = ak.combinations(labels, 3, fields=["j1", "j2", "j3"])
-    trijet["p4"] = trijet.j1 + trijet.j2 + trijet.j3  # calculate four-momentum of tri-jet system
-    trijet["label"] = trijet_labels.j1 + trijet_labels.j2 + trijet_labels.j3
-    trijet["max_btag"] = np.maximum(trijet.j1.btagCSVV2, np.maximum(trijet.j2.btagCSVV2, trijet.j3.btagCSVV2))
-    trijet = trijet[trijet.max_btag > 0.5]  # at least one-btag in trijet candidates
-    # pick trijet candidate with largest pT and calculate mass of system
-    trijet_mass = trijet["p4"][ak.argmax(trijet.p4.pt, axis=1, keepdims=True)].mass
-    trijet_label = trijet["label"]
-    observable = ak.flatten(trijet_mass)
-    trijet_label = ak.flatten(trijet_label)
-    print("   Fraction Correct = ", sum(trijet_label==24+24+6)/len(trijet_label))
-    print("   Fraction Wrong Top = ", sum(trijet_label==24+24-6)/len(trijet_label))
-    print("   Fraction Wrong W = ", sum(trijet_label==24+6-6)/len(trijet_label))
-
-# %%
+# +
 ### SCORE NOT SEPARATED BY NJET
 
-jets, electrons, muons, labels = filterEvents(events.Jet, events.Electron, events.Muon, events.GenPart, 4, MAX_N_JETS)
+jets, electrons, muons, current_even, labels = filterEvents(events.Jet, events.Electron, events.Muon, events.GenPart, even, 4, MAX_N_JETS)
 print("filtered events")
     
 njet = ak.num(jets).to_numpy()
@@ -390,15 +365,14 @@ features, perm_counts = get_features(jets,
                                      electrons, 
                                      muons, 
                                      permutations_dict)
+
+current_even = np.repeat(current_even, perm_counts)
 print("calculated features")
 
-# preprocess features so that they are more Gaussian-like
-power = PowerTransformer(method='yeo-johnson', standardize=True)
-features = power.fit_transform(features)
-print("preprocessed features")
-
 # get predictions
-predictions = model.predict_proba(features)[:,0]
+predictions = np.zeros(features.shape[0])
+predictions[np.invert(current_even)] = model_even.predict_proba(features[np.invert(current_even)])[:,1]
+predictions[current_even] = model_odd.predict_proba(features[current_even])[:,1]
 print("obtained predictions")
 
 BDT_results = ak.unflatten(predictions, perm_counts)
@@ -451,32 +425,15 @@ axs[1].legend(["[0]","(0,20]","(20,40]","(40,60]","(60,80]","(80,100]"],
               bbox_to_anchor=(1,1), title = "% of Jets Correct")
                     
 fig.show()
+# -
 
-# %% [markdown]
 # # Evaluation 2
 #
 # Next, we evaluate the performance for all events in which it is possible to fully reconstruct, but separate the calculations by number of jets (and type of jet/jet label)
 
-# %%
-for n in range(4,10):
-    print("Number of Jets = ", n)
-    jets, electrons, muons, labels = filterEvents(events.Jet, events.Electron, events.Muon, events.GenPart, n, n)
-    trijet = ak.combinations(jets, 3, fields=["j1", "j2", "j3"])  # trijet candidates
-    trijet_labels = ak.combinations(labels, 3, fields=["j1", "j2", "j3"])
-    trijet["p4"] = trijet.j1 + trijet.j2 + trijet.j3  # calculate four-momentum of tri-jet system
-    trijet["label"] = trijet_labels.j1 + trijet_labels.j2 + trijet_labels.j3
-    trijet["max_btag"] = np.maximum(trijet.j1.btagCSVV2, np.maximum(trijet.j2.btagCSVV2, trijet.j3.btagCSVV2))
-    trijet = trijet[trijet.max_btag > 0.5]  # at least one-btag in trijet candidates
-    # pick trijet candidate with largest pT and calculate mass of system
-    trijet_mass = trijet["p4"][ak.argmax(trijet.p4.pt, axis=1, keepdims=True)].mass
-    trijet_label = trijet["label"]
-    observable = ak.flatten(trijet_mass)
-    trijet_label = ak.flatten(trijet_label)
-    print("   Fraction Correct = ", sum(trijet_label==24+24+6)/len(trijet_label))
-    print("   Fraction Wrong Top = ", sum(trijet_label==24+24-6)/len(trijet_label))
-    print("   Fraction Wrong W = ", sum(trijet_label==24+6-6)/len(trijet_label))
+B_TAG_THRESHOLD = 0.5
 
-# %%
+# +
 # scores not separated by jet label
 bdt_score_dict = {}
 random_score_dict = {}
@@ -496,24 +453,8 @@ for n in range(4,MAX_N_JETS+1):
     
     print("n = ", n)
     # filter data
-    jets, electrons, muons, labels = filterEvents(events.Jet, events.Electron, events.Muon, events.GenPart, n, n)
+    jets, electrons, muons, current_even, labels = filterEvents(events.Jet, events.Electron, events.Muon, events.GenPart, even, n, n)
     print("    filtered events")
-    
-    trijet = ak.combinations(jets, 3, fields=["j1", "j2", "j3"])  # trijet candidates
-    trijet_labels = ak.combinations(labels, 3, fields=["j1", "j2", "j3"])
-    trijet["p4"] = trijet.j1 + trijet.j2 + trijet.j3  # calculate four-momentum of tri-jet system
-    trijet["label"] = trijet_labels.j1 + trijet_labels.j2 + trijet_labels.j3
-    trijet["max_btag"] = np.maximum(trijet.j1.btagCSVV2, np.maximum(trijet.j2.btagCSVV2, trijet.j3.btagCSVV2))
-    trijet = trijet[trijet.max_btag > B_TAG_THRESHOLD]  # at least one-btag in trijet candidates
-    # pick trijet candidate with largest pT and calculate mass of system
-    trijet_mass = trijet["p4"][ak.argmax(trijet.p4.pt, axis=1, keepdims=True)].mass
-    trijet_label = trijet["label"]
-    observable = ak.flatten(trijet_mass)
-    trijet_label = ak.flatten(trijet_label)
-    print("    Calculated by Original Method")
-    print("        Fraction Correct = ", sum(trijet_label==24+24+6)/len(output["trijet_label"].value))
-    print("        Fraction Wrong Top = ", sum(trijet_label==24+24-6)/len(output["trijet_label"].value))
-    print("        Fraction Wrong W = ", sum(trijet_label==24+6-6)/len(output["trijet_label"].value))
     
     njet = ak.num(jets).to_numpy()
     njet[njet>max(permutations_dict.keys())] = max(permutations_dict.keys())
@@ -543,16 +484,14 @@ for n in range(4,MAX_N_JETS+1):
                                          electrons, 
                                          muons, 
                                          permutations_dict)
+    current_even = np.repeat(current_even, perm_counts)
     print("    calculated features")
 
-    # preprocess features so that they are more Gaussian-like
-    power = PowerTransformer(method='yeo-johnson', standardize=True)
-    features = power.fit_transform(features)
-    print("    preprocessed features")
-
     # get predictions
-    predictions = model.predict_proba(features)[:,1]
-    print("    obtained predictions")
+    predictions = np.zeros(features.shape[0])
+    predictions[np.invert(current_even)] = model_even.predict_proba(features[np.invert(current_even)])[:,1]
+    predictions[current_even] = model_odd.predict_proba(features[current_even])[:,1]
+    print("obtained predictions")
 
     BDT_results = ak.unflatten(predictions, perm_counts)
     BDT_result_combination = ak.argmax(BDT_results,axis=1)
@@ -609,7 +548,7 @@ for n in range(4,MAX_N_JETS+1):
     
     print("    calculated scores")
 
-# %%
+# +
 # plots with all jet labels together
 fig, axs = plt.subplots(MAX_N_JETS-3,2,figsize=(6,4*(MAX_N_JETS-3)))
 
@@ -624,7 +563,7 @@ for i in range(MAX_N_JETS-3):
                     
 fig.show()
 
-# %%
+# +
 # plots for W jets
 fig, axs = plt.subplots(MAX_N_JETS-3,2,figsize=(8,4*(MAX_N_JETS-3)))
 
@@ -639,7 +578,7 @@ for i in range(MAX_N_JETS-3):
                     
 fig.show()
 
-# %%
+# +
 # plots for top2 jets
 fig, axs = plt.subplots(MAX_N_JETS-3,2,figsize=(8,4*(MAX_N_JETS-3)))
 
@@ -655,7 +594,7 @@ for i in range(MAX_N_JETS-3):
                     
 fig.show()
 
-# %%
+# +
 # plots for top1 jets
 fig, axs = plt.subplots(MAX_N_JETS-3,2,figsize=(8,4*(MAX_N_JETS-3)))
 
@@ -670,36 +609,15 @@ for i in range(MAX_N_JETS-3):
     axs[i,1].legend(range(len(bdt_top1_score_dict[i+4])), bbox_to_anchor=(1,1), title = "# Jets Correct")
                     
 fig.show()
+# -
 
-# %% [markdown]
 # # Evaluation 3
 #
 # Now we want to see the effect of `MAX_N_JETS` on overall efficiency. So we will not filter to events that are fully reconstructable.
 
-# %%
-for MAX_N_JETS in range(4,10):
-    jets, electrons, muons, labels = filterEvents(events.Jet, events.Electron, events.Muon, events.GenPart, 
-                                                  4, MAX_N_JETS, reconstructable=False)
+MAX_N_JETS_LIST = list(range(4,8)) # values of MAX_N_JETS to consider
 
-    trijet = ak.combinations(jets, 3, fields=["j1", "j2", "j3"])  # trijet candidates
-    trijet_labels = ak.combinations(labels, 3, fields=["j1", "j2", "j3"])
-    trijet["p4"] = trijet.j1 + trijet.j2 + trijet.j3  # calculate four-momentum of tri-jet system
-    trijet["label"] = trijet_labels.j1 + trijet_labels.j2 + trijet_labels.j3
-    trijet["max_btag"] = np.maximum(trijet.j1.btagCSVV2, np.maximum(trijet.j2.btagCSVV2, trijet.j3.btagCSVV2))
-    trijet = trijet[trijet.max_btag > 0.5]  # at least one-btag in trijet candidates
-    # pick trijet candidate with largest pT and calculate mass of system
-    trijet_mass = trijet["p4"][ak.argmax(trijet.p4.pt, axis=1, keepdims=True)].mass
-    trijet_label = trijet["label"]
-    observable = ak.flatten(trijet_mass)
-    trijet_label = ak.flatten(trijet_label)
-    print("   Fraction Correct = ", sum(trijet_label==24+24+6)/len(trijet_label))
-    print("   Fraction Wrong Top = ", sum(trijet_label==24+24-6)/len(trijet_label))
-    print("   Fraction Wrong W = ", sum(trijet_label==24+6-6)/len(trijet_label))
-
-# %%
-MAX_N_JETS_LIST = list(range(4,6)) # values of MAX_N_JETS to consider
-
-# %%
+# +
 bdt_score_dict = {}
 fig, axs = plt.subplots(len(MAX_N_JETS_LIST),4,figsize=(14,4*len(MAX_N_JETS_LIST)))
 
@@ -711,8 +629,9 @@ score_avg_top1 = np.zeros(len(MAX_N_JETS_LIST))
 for MAX_N_JETS in MAX_N_JETS_LIST:
 
     print("MAX_N_JETS = ", MAX_N_JETS)
-    jets, electrons, muons, labels = filterEvents(events.Jet, events.Electron, events.Muon, events.GenPart, 
-                                                  4, MAX_N_JETS, reconstructable=False)
+    jets, electrons, muons, current_even, labels = filterEvents(events.Jet, events.Electron, events.Muon, 
+                                                                events.GenPart, even,
+                                                                4, MAX_N_JETS, reconstructable=False)
     print("    filtered events")
     
     njet = ak.num(jets).to_numpy()
@@ -728,16 +647,14 @@ for MAX_N_JETS in MAX_N_JETS_LIST:
                                          electrons, 
                                          muons, 
                                          permutations_dict)
+    current_even = np.repeat(current_even, perm_counts)
     print("    calculated features")
 
-    # preprocess features so that they are more Gaussian-like
-    power = PowerTransformer(method='yeo-johnson', standardize=True)
-    features = power.fit_transform(features)
-    print("    preprocessed features")
-
     # get predictions
-    predictions = model.predict_proba(features)[:,1]
-    print("    obtained predictions")
+    predictions = np.zeros(features.shape[0])
+    predictions[np.invert(current_even)] = model_even.predict_proba(features[np.invert(current_even)])[:,1]
+    predictions[current_even] = model_odd.predict_proba(features[current_even])[:,1]
+    print("obtained predictions")
 
     BDT_results = ak.unflatten(predictions, perm_counts)
     BDT_result_combination = ak.argmax(BDT_results,axis=1)
@@ -813,8 +730,8 @@ for MAX_N_JETS in MAX_N_JETS_LIST:
     axs[MAX_N_JETS-4,3].legend([0,1], title="# Correct", loc='upper right', bbox_to_anchor=(1.3,1))
 
 plt.show()
+# -
 
-# %%
 fig,ax = plt.subplots(1,1,figsize=(6,4))
 ax.plot(MAX_N_JETS_LIST, score_avg_all, '-o')
 ax.plot(MAX_N_JETS_LIST, score_avg_W, '-o')
@@ -824,3 +741,5 @@ ax.set_xlabel("MAX_N_JETS")
 ax.set_ylabel("Average # Jets Correct")
 ax.grid()
 ax.legend(["All Labels", "W", "top2", "top1"],bbox_to_anchor=(1.02,1))
+
+

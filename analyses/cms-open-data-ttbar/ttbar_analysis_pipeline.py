@@ -1,19 +1,18 @@
 # ---
 # jupyter:
 #   jupytext:
-#     formats: ipynb,py:percent
+#     formats: ipynb,py
 #     text_representation:
 #       extension: .py
-#       format_name: percent
-#       format_version: '1.3'
-#       jupytext_version: 1.14.1
+#       format_name: light
+#       format_version: '1.5'
+#       jupytext_version: 1.14.5
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
 #     name: python3
 # ---
 
-# %% [markdown]
 # # CMS Open Data $t\bar{t}$: from data delivery to statistical inference
 #
 # We are using [2015 CMS Open Data](https://cms.cern/news/first-cms-open-data-lhc-run-2-released) in this demonstration to showcase an analysis pipeline.
@@ -31,16 +30,14 @@
 # This notebook implements most of the analysis pipeline shown in the following picture, using the tools also mentioned there:
 # ![ecosystem visualization](utils/ecosystem.png)
 
-# %% [markdown]
 # ### Data pipelines
 #
 # There are two possible pipelines: one with `ServiceX` enabled, and one using only `coffea` for processing.
 # ![processing pipelines](utils/processing_pipelines.png)
 
-# %% [markdown]
 # ### Imports: setting up our environment
 
-# %%
+# +
 import asyncio
 import logging
 import os
@@ -68,8 +65,8 @@ from sklearn.preprocessing import PowerTransformer
 import utils  # contains code for bookkeeping and cosmetics, as well as some boilerplate
 
 logging.getLogger("cabinetry").setLevel(logging.INFO)
+# -
 
-# %% [markdown]
 # ### Configuration: number of files and data delivery path
 #
 # The number of files per sample set here determines the size of the dataset we are processing.
@@ -93,7 +90,7 @@ logging.getLogger("cabinetry").setLevel(logging.INFO)
 #
 # The input files are all in the 1–3 GB range.
 
-# %%
+# +
 ### GLOBAL CONFIGURATION
 
 # input files per process, set to e.g. 10 (smaller number = faster)
@@ -151,17 +148,15 @@ MODEL_VERSION_ODD = "2"
 
 # URL of triton server 
 TRITON_URL = "agc-triton-inference-server:8001"
+# -
 
-# %% [markdown]
 # ### Machine Learning Task
 #
 # During the processing step, machine learning is used to calculate one of the variables used for this analysis. The models used are trained separately in the `jetassignment_training.ipynb` notebook. Jets in the events are assigned to labels corresponding with their parent partons using a boosted decision tree (BDT). More information about the model and training can be found within that notebook. To obtain the features used as inputs for the BDT, we use the methods defined below:
 
-# %%
 permutations_dict = utils.get_permutations_dict(MAX_N_JETS)
 
 
-# %%
 def get_features(jets, electrons, muons, permutations_dict):
     
     '''
@@ -245,7 +240,6 @@ def get_features(jets, electrons, muons, permutations_dict):
     return features.astype(np.float32), perm_counts
 
 
-# %% [markdown]
 # ### Defining our `coffea` Processor
 #
 # The processor includes a lot of the physics analysis details:
@@ -254,7 +248,7 @@ def get_features(jets, electrons, muons, permutations_dict):
 # - calculating systematic uncertainties at the event and object level,
 # - filling all the information into histograms that get aggregated and ultimately returned to us by `coffea`.
 
-# %% tags=[]
+# +
 # functions creating systematic variations
 def flat_variation(ones):
     # 2.5% weight variations
@@ -286,7 +280,6 @@ class TtbarAnalysis(processor.ProcessorABC):
         label = "observable [GeV]"
         self.hist = (
             hist.Hist.new.Reg(num_bins, bin_low, bin_high, name=name, label=label)
-            .Reg(num_bins, bin_low, bin_high, name="ml_observable", label="ML observable [GeV]")
             .StrCat(["4j1b", "4j2b"], name="region", label="Region")
             .StrCat([], name="process", label="Process", growth=True)
             .StrCat([], name="variation", label="Systematic variation", growth=True)
@@ -294,6 +287,14 @@ class TtbarAnalysis(processor.ProcessorABC):
         )
         self.disable_processing = disable_processing
         self.io_file_percent = io_file_percent
+        
+        self.mlhist = (
+            hist.Hist.new.Reg(num_bins, bin_low, bin_high, name="topmass", label="Reconstructed Top Mass [GeV]")
+            .Reg(25, 0, 8, name="lepton_deltar", label="$\Delta R$ between $top_{lepton}$ Jet and Lepton")
+            .StrCat([], name="process", label="Process", growth=True)
+            .StrCat([], name="variation", label="Systematic variation", growth=True)
+            .Weight()
+        )
         
         # for ML inference
         self.use_triton = use_triton
@@ -357,6 +358,7 @@ class TtbarAnalysis(processor.ProcessorABC):
             return self.only_do_IO(events)
 
         histogram = self.hist.copy()
+        histogram_ml = self.mlhist.copy()
 
         process = events.metadata["process"]  # "ttbar" etc.
         variation = events.metadata["variation"]  # "nominal" etc.
@@ -445,7 +447,6 @@ class TtbarAnalysis(processor.ProcessorABC):
                         else events[pt_var][jet_filter][event_filters][region_filter]
                     )
                     observable = ak.sum(selected_jets_region.pt * pt_var_modifier, axis=-1)
-                    ML_observable = observable
 
                 elif region == "4j2b":
                     region_filter = ak.sum(selected_jets.btagCSVV2 > B_TAG_THRESHOLD, axis=1) >= 2
@@ -483,7 +484,7 @@ class TtbarAnalysis(processor.ProcessorABC):
                             inpt[0].set_data_from_numpy(features[even_perm])
                             results[even_region]=triton_client.infer(
                                 model_name=self.model_name, 
-                                model_version=self.model_version_even,
+                                model_version=self.model_version_odd,
                                 inputs=inpt, 
                                 outputs=[output]
                             ).as_numpy(output_name)[:, 1]
@@ -493,7 +494,7 @@ class TtbarAnalysis(processor.ProcessorABC):
                             inpt[0].set_data_from_numpy(features[np.invert(even_perm)])
                             results[np.invert(even_region)]=triton_client.infer(
                                 model_name=self.model_name, 
-                                model_version=self.model_version_odd,
+                                model_version=self.model_version_even,
                                 inputs=inpt, 
                                 outputs=[output]
                             ).as_numpy(output_name)[:, 1]
@@ -502,25 +503,28 @@ class TtbarAnalysis(processor.ProcessorABC):
                         
                         results = np.zeros(features.shape[0])
                         if len(features[even_perm])>0:
-                            results[even_perm] = self.xgboost_model_even.predict_proba(
+                            results[even_perm] = self.xgboost_model_odd.predict_proba(
                                 features[even_perm,:])[:, 1]
                         if len(features[np.invert(even_perm)])>0:
-                            results[np.invert(even_perm)] = results_odd = self.xgboost_model_odd.predict_proba(
+                            results[np.invert(even_perm)] = results_odd = self.xgboost_model_even.predict_proba(
                                 features[np.invert(even_perm),:])[:, 1]
                         
                     results = ak.unflatten(results, perm_counts)
                     which_combination = ak.argmax(results,axis=1)
                     features_unflattened = ak.unflatten(features, perm_counts)
-                    ML_observable = ak.flatten(features_unflattened[ak.from_regular(which_combination[:, np.newaxis])])[...,6]
-                    # ML_observable = observable
+                    ml_topmass = ak.flatten(features_unflattened[ak.from_regular(which_combination[:, np.newaxis])])[...,6]
+                    ml_deltar = ak.flatten(features_unflattened[ak.from_regular(which_combination[:, np.newaxis])])[...,0]
                     
                 ### histogram filling
                 if pt_var == "pt_nominal":
                     # nominal pT, but including 2-point systematics
                     histogram.fill(
-                            observable=observable, ml_observable=ML_observable, region=region, process=process,
+                            observable=observable, region=region, process=process,
                             variation=variation, weight=xsec_weight
                         )
+                    if region=="4j2b":
+                        histogram_ml.fill(topmass=ml_topmass, lepton_deltar=ml_deltar, process=process,
+                                          variation=variation, weight=xsec_weight)
 
                     if variation == "nominal":
                         # also fill weight-based variations for all nominal samples
@@ -531,9 +535,12 @@ class TtbarAnalysis(processor.ProcessorABC):
                                     f"weight_{weight_name}"][event_filters][region_filter]
                                 # fill histograms
                                 histogram.fill(
-                                    observable=observable, ml_observable=ML_observable, region=region, process=process,
+                                    observable=observable, region=region, process=process,
                                     variation=f"{weight_name}_{direction}", weight=xsec_weight*weight_variation
                                 )
+                                if region=="4j2b":
+                                    histogram_ml.fill(topmass=ml_topmass, lepton_deltar=ml_deltar, process=process,
+                                          variation=f"{weight_name}_{direction}", weight=xsec_weight*weight_variation)
 
                         # calculate additional systematics: b-tagging variations
                         for i_var, weight_name in enumerate([f"btag_var_{i}" for i in range(4)]):
@@ -544,20 +551,27 @@ class TtbarAnalysis(processor.ProcessorABC):
                                 else:
                                     weight_variation = 1 # no events selected
                                 histogram.fill(
-                                    observable=observable, ml_observable=ML_observable, region=region, process=process,
+                                    observable=observable, region=region, process=process,
                                     variation=f"{weight_name}_{direction}", weight=xsec_weight*weight_variation
                                 )
+                                if region=="4j2b":
+                                    histogram_ml.fill(topmass=ml_topmass, lepton_deltar=ml_deltar, process=process,
+                                          variation=f"{weight_name}_{direction}", weight=xsec_weight*weight_variation)
 
                 elif variation == "nominal":
                     # pT variations for nominal samples
                     histogram.fill(
-                            observable=observable, ml_observable=ML_observable, region=region, process=process,
+                            observable=observable, region=region, process=process,
                             variation=pt_var, weight=xsec_weight
                         )
+                    if region=="4j2b":
+                        histogram_ml.fill(topmass=ml_topmass, lepton_deltar=ml_deltar, process=process,
+                                          variation=pt_var, weight=xsec_weight)
 
         
         output = {"nevents": {events.metadata["dataset"]: len(events)},
-                  "hist": histogram}
+                  "hist": histogram, 
+                  "mlhist": histogram_ml}
         
         if self.use_triton:
             triton_client.close()
@@ -566,13 +580,13 @@ class TtbarAnalysis(processor.ProcessorABC):
 
     def postprocess(self, accumulator):
         return accumulator
+# -
 
-# %% [markdown]
 # ### "Fileset" construction and metadata
 #
 # Here, we gather all the required information about the files we want to process: paths to the files and asociated metadata.
 
-# %% tags=[]
+# +
 fileset = utils.construct_fileset(N_FILES_MAX_PER_SAMPLE, use_xcache=False, af_name=AF_NAME)  # local files on /data for ssl-dev
 
 print(f"processes in fileset: {list(fileset.keys())}")
@@ -580,12 +594,12 @@ print(f"\nexample of information in fileset:\n{{\n  'files': [{fileset['ttbar__n
 print(f"  'metadata': {fileset['ttbar__nominal']['metadata']}\n}}")
 
 
-# %% [markdown]
+# -
+
 # ### ServiceX-specific functionality: query setup
 #
 # Define the func_adl query to be used for the purpose of extracting columns and filtering.
 
-# %%
 def get_query(source: ObjectStream) -> ObjectStream:
     """Query for event / column selection: >=4j >=1b, ==1 lep with pT>25 GeV, return relevant columns
     """
@@ -606,12 +620,10 @@ def get_query(source: ObjectStream) -> ObjectStream:
                                    })
 
 
-# %% [markdown]
 # ### Caching the queried datasets with `ServiceX`
 #
 # Using the queries created with `func_adl`, we are using `ServiceX` to read the CMS Open Data files to build cached files with only the specific event information as dictated by the query.
 
-# %%
 if USE_SERVICEX:
     
     # dummy dataset on which to generate the query
@@ -641,14 +653,13 @@ if USE_SERVICEX:
 
     print(f"ServiceX data delivery took {time.time() - t0:.2f} seconds")
 
-# %% [markdown]
 # ### Execute the data delivery pipeline
 #
 # What happens here depends on the flag `USE_SERVICEX`. If set to true, the processor is run on the data previously gathered by ServiceX, then will gather output histograms.
 #
 # When `USE_SERVICEX` is false, the input files need to be processed during this step as well.
 
-# %%
+# +
 NanoAODSchema.warn_missing_crossrefs = False # silences warnings about branches we will not use here
 if USE_DASK:
     executor = processor.DaskExecutor(client=utils.get_client(AF))
@@ -688,7 +699,7 @@ exec_time = time.monotonic() - t0
 
 print(f"\nexecution took {exec_time:.2f} seconds")
 
-# %%
+# +
 # track metrics
 dataset_source = "/data" if fileset["ttbar__nominal"]["files"][0].startswith("/data") else "https://xrootd-local.unl.edu:1094" # TODO: xcache support
 metrics.update({
@@ -718,40 +729,37 @@ print(f"metrics saved as {metric_file_name}")
 #print(f"event rate per worker (full execution time divided by NUM_CORES={NUM_CORES}): {metrics['entries'] / NUM_CORES / exec_time / 1_000:.2f} kHz")
 print(f"event rate per worker (pure processtime): {metrics['entries'] / metrics['processtime'] / 1_000:.2f} kHz")
 print(f"amount of data read: {metrics['bytesread']/1000**2:.2f} MB")  # likely buggy: https://github.com/CoffeaTeam/coffea/issues/717
+# -
 
-# %% [markdown]
 # ### Inspecting the produced histograms
 #
 # Let's have a look at the data we obtained.
 # We built histograms in two phase space regions, for multiple physics processes and systematic variations.
 
-# %%
+# +
 utils.set_style()
 
 all_histograms["hist"][120j::hist.rebin(2), :, "4j1b", :, "nominal"].stack("process").project("observable").plot(stack=True, histtype="fill", linewidth=1, edgecolor="grey")
 plt.legend(frameon=False)
 plt.title(">= 4 jets, 1 b-tag")
 plt.xlabel("HT [GeV]");
+# -
 
-# %%
 all_histograms["hist"][:, 120j::hist.rebin(2), "4j1b", :, "nominal"].stack("process").project("ml_observable").plot(stack=True, histtype="fill", linewidth=1, edgecolor="grey")
 plt.legend(frameon=False)
 plt.title(">= 4 jets, 1 b-tag")
 plt.xlabel("HT [GeV]");
 
-# %%
 all_histograms["hist"][:, :, "4j2b", :, "nominal"].stack("process").project("observable").plot(stack=True, histtype="fill", linewidth=1, edgecolor="grey")
 plt.legend(frameon=False)
 plt.title(">= 4 jets, >= 2 b-tags")
 plt.xlabel("$m_{bjj}$ [Gev]");
 
-# %%
 all_histograms["hist"][:, :, "4j2b", :, "nominal"].stack("process").project("ml_observable").plot(stack=True, histtype="fill", linewidth=1, edgecolor="grey")
 plt.legend(frameon=False)
 plt.title(">= 4 jets, >= 2 b-tags")
 plt.xlabel("$m_{bjj}$ [Gev]");
 
-# %% [markdown]
 # Our top reconstruction approach ($bjj$ system with largest $p_T$) has worked!
 #
 # Let's also have a look at some systematic variations:
@@ -760,7 +768,6 @@ plt.xlabel("$m_{bjj}$ [Gev]");
 #
 # We are making of [UHI](https://uhi.readthedocs.io/) here to re-bin.
 
-# %%
 # b-tagging variations
 all_histograms["hist"][120j::hist.rebin(2), :, "4j1b", "ttbar", "nominal"].project("observable").plot(label="nominal", linewidth=2)
 all_histograms["hist"][120j::hist.rebin(2), :, "4j1b", "ttbar", "btag_var_0_up"].project("observable").plot(label="NP 1", linewidth=2)
@@ -771,7 +778,7 @@ plt.legend(frameon=False)
 plt.xlabel("HT [GeV]")
 plt.title("b-tagging variations");
 
-# %%
+# +
 # jet energy scale variations
 all_histograms["hist"][:, :, "4j2b", "ttbar", "nominal"].project("observable").plot(label="nominal", linewidth=2)
 all_histograms["hist"][:, :, "4j2b", "ttbar", "pt_scale_up"].project("observable").plot(label="scale up", linewidth=2)
@@ -788,24 +795,21 @@ plt.legend(frameon=False)
 plt.xlabel("$m_{bjj}$ [Gev]")
 plt.title("Jet energy variations (BDT method)");
 plt.show()
+# -
 
-# %% [markdown]
 # ### Save histograms to disk
 #
 # We'll save everything to disk for subsequent usage.
 # This also builds pseudo-data by combining events from the various simulation setups we have processed.
 
-# %%
 utils.save_histograms(all_histograms["hist"], fileset, "histograms_noml.root", ml=False)
 utils.save_histograms(all_histograms["hist"], fileset, "histograms_ml.root", ml=True)
 
-# %% [markdown]
 # ### Statistical inference
 #
 # A statistical model has been defined in `config.yml`, ready to be used with our output.
 # We will use `cabinetry` to combine all histograms into a `pyhf` workspace and fit the resulting statistical model to the pseudodata we built.
 
-# %%
 # no ml version
 config = cabinetry.configuration.load("cabinetry_config.yml")
 cabinetry.templates.collect(config)
@@ -813,58 +817,46 @@ cabinetry.templates.postprocess(config)  # optional post-processing (e.g. smooth
 ws = cabinetry.workspace.build(config)
 cabinetry.workspace.save(ws, "workspace.json")
 
-# %% [markdown]
 # We can inspect the workspace with `pyhf`, or use `pyhf` to perform inference.
 
-# %%
 # !pyhf inspect workspace.json | head -n 20
 
-# %% [markdown]
 # Let's try out what we built: the next cell will perform a maximum likelihood fit of our statistical model to the pseudodata we built.
 
-# %%
+# +
 model, data = cabinetry.model_utils.model_and_data(ws)
 fit_results = cabinetry.fit.fit(model, data)
 
 cabinetry.visualize.pulls(
     fit_results, exclude="ttbar_norm", close_figure=True, save_figure=False
 )
+# -
 
-# %% [markdown]
 # For this pseudodata, what is the resulting ttbar cross-section divided by the Standard Model prediction?
 
-# %%
 poi_index = model.config.poi_index
 print(f"\nfit result for ttbar_norm: {fit_results.bestfit[poi_index]:.3f} +/- {fit_results.uncertainty[poi_index]:.3f}")
 
-# %% [markdown]
 # Let's also visualize the model before and after the fit, in both the regions we are using.
 # The binning here corresponds to the binning used for the fit.
 
-# %%
 model_prediction = cabinetry.model_utils.prediction(model)
-figs = cabinetry.visualize.data_mc(model_prediction, data, close_figure=True)
+figs = cabinetry.visualize.data_mc(model_prediction, data, close_figure=True, config=config)
 figs[0]["figure"]
 
-# %%
 figs[1]["figure"]
 
-# %% [markdown]
 # We can see very good post-fit agreement.
 
-# %%
 model_prediction_postfit = cabinetry.model_utils.prediction(model, fit_results=fit_results)
 figs = cabinetry.visualize.data_mc(model_prediction_postfit, data, close_figure=True)
 figs[0]["figure"]
 
-# %%
 figs[1]["figure"]
 
-# %% [markdown]
 # ### ML Validation
 # We used two methods to reconstruct the top mass: choosing the three-jet system with the highest $p_T$ and choosing the three jets based on the output from out boosted decision tree. We can further validate our results by applying the above fit to the ML variable and checking for good agreement.
 
-# %%
 # load the ml workspace (uses the ml observable instead of previous method)
 config_ml = cabinetry.configuration.load("cabinetry_config_ml.yml")
 cabinetry.templates.collect(config_ml)
@@ -872,36 +864,30 @@ cabinetry.templates.postprocess(config_ml)  # optional post-processing (e.g. smo
 ws_ml = cabinetry.workspace.build(config_ml)
 cabinetry.workspace.save(ws_ml, "workspace_ml.json")
 
-# %%
 model_ml, data_ml = cabinetry.model_utils.model_and_data(ws_ml)
 
-# %% [markdown]
 # We can see that we've added a channel to the workspace:
 
-# %%
+# don't need other channels
 # !pyhf inspect workspace_ml.json | head -n 20
 
-# %% [markdown]
 # Let's view the model obtained using the ML observable before the fit:
 
-# %%
 model_prediction = cabinetry.model_utils.prediction(model_ml)
 figs = cabinetry.visualize.data_mc(model_prediction, data_ml, close_figure=True)
 figs[1]["figure"]
 
-# %% [markdown]
 # Now applying the fit results from the trijet combination observable to the ML observable, let's see whether we have good data-MC agreement:
 
-# %%
 fit_results_mod = cabinetry.model_utils.match_fit_results(model_ml, fit_results)
 model_prediction_postfit = cabinetry.model_utils.prediction(model_ml, fit_results=fit_results_mod)
-figs = cabinetry.visualize.data_mc(model_prediction_postfit, data_ml, close_figure=True)
+figs = cabinetry.visualize.data_mc(model_prediction_postfit, data_ml, close_figure=True, config=config_ml)
 figs[1]["figure"]
 
-# %% [markdown]
+model_prediction_postfit.model_yields
+
 # We still see very good post-fit agreement here.
 
-# %% [markdown]
 # ### What is next?
 #
 # Our next goals for this pipeline demonstration are:

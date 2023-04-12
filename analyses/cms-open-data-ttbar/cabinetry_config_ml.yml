@@ -6,14 +6,12 @@ General:
   VariationPath: ""
 
 Regions:
-  - Name: "4j1b CR"
-    RegionPath: "4j1b"
 
-  - Name: "4j2b SR"
-    RegionPath: "4j2b"
+  - Name: "4j2b ML Top Mass"
+    RegionPath: "4j2bML_a"
     
-  - Name: "4j2b CR"
-    RegionPath: "4j2bML"
+  - Name: "4j2b ML Delta R"
+    RegionPath: "4j2bML_b"
 
 Samples:
   - Name: "Pseudodata"

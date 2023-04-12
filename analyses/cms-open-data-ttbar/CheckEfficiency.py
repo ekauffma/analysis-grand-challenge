@@ -33,78 +33,28 @@ import awkward as ak
 import xgboost as xgb
 
 import utils
+# -
 
-# +
-DICT_MAX = 7 # maximum permutation number to include in dictionaries
-
-# calculate the dictionary of permutations for each number of jets
-permutations_dict = {}
-for n in range(4,DICT_MAX+1):
-    test = ak.Array(range(n))
-    unzipped = ak.unzip(ak.argcartesian([test]*4,axis=0))
-
-    combos = ak.combinations(ak.Array(range(4)), 2, axis=0)
-    different = unzipped[combos[0]["0"]]!=unzipped[combos[0]["1"]]
-    for i in range(1,len(combos)):
-        different = different & (unzipped[combos[i]["0"]]!=unzipped[combos[i]["1"]])
-
-    permutations = ak.zip([test[unzipped[i][different]] for i in range(len(unzipped))],
-                          depth_limit=1).tolist()
-
-
-    permutations = ak.concatenate([test[unzipped[i][different]][..., np.newaxis] 
-                                   for i in range(len(unzipped))], 
-                                  axis=1).to_list()
-    
-    permutations_dict[n] = permutations
-    
-# for each permutation, calculate the corresponding label
-labels_dict = {}
-for n in range(4,DICT_MAX+1):
-    
-    current_labels = []
-    for inds in permutations_dict[n]:
-        
-        inds = np.array(inds)
-        current_label = 100*np.ones(n)
-        current_label[inds[:2]] = 24
-        current_label[inds[2]] = 6
-        current_label[inds[3]] = -6
-        current_labels.append(current_label.tolist())
-        
-    labels_dict[n] = current_labels
-    
-# get rid of duplicates since we consider W jets to be exchangeable
-# (halves the number of permutations we consider)
-for n in range(4,DICT_MAX+1):
-    res = []
-    for idx, val in enumerate(labels_dict[n]):
-        if val in labels_dict[n][:idx]:
-            res.append(idx)
-    labels_dict[n] = np.array(labels_dict[n])[res].tolist()
-    permutations_dict[n] = np.array(permutations_dict[n])[res].tolist()
-    print("number of permutations for n=",n,": ", len(permutations_dict[n]))
+DICT_MAX = 7
+permutations_dict, labels_dict, evaluation_matrices = utils.get_permutations_dict(DICT_MAX, 
+                                                                                  include_labels=True, 
+                                                                                  include_eval_mat=True)
 
 # +
 # these matrices tell you the overlap between the predicted label (rows) and truth label (columns)
 # the "score" in each matrix entry is the number of jets which are assigned correctly
-evaluation_matrices = {} # overall event score
 evaluation_matrices_W = {} # score for W jets
 evaluation_matrices_top2 = {} # score for top2 jet
 evaluation_matrices_top1 = {} # score for top1 jet
 
 for n in range(4,DICT_MAX+1):
     print("n = ", n)
-    
-    evaluation_matrix = np.zeros((len(permutations_dict[n]),len(permutations_dict[n])))
     evaluation_matrix_W = np.zeros((len(permutations_dict[n]),len(permutations_dict[n])))
     evaluation_matrix_top2 = np.zeros((len(permutations_dict[n]),len(permutations_dict[n])))
     evaluation_matrix_top1 = np.zeros((len(permutations_dict[n]),len(permutations_dict[n])))
     
     for i in range(len(permutations_dict[n])):
         for j in range(len(permutations_dict[n])):
-            
-            evaluation_matrix[i,j]=sum(np.equal(labels_dict[n][i], labels_dict[n][j]))
             evaluation_matrix_W[i,j]=4-len(np.union1d(np.where(np.array(labels_dict[n][i])==24)[0],
                                                       np.where(np.array(labels_dict[n][j])==24)[0]))
             evaluation_matrix_top2[i,j]=2-len(np.union1d(np.where(np.array(labels_dict[n][i])==6)[0],
@@ -112,98 +62,12 @@ for n in range(4,DICT_MAX+1):
             evaluation_matrix_top1[i,j]=2-len(np.union1d(np.where(np.array(labels_dict[n][i])==-6)[0],
                                                          np.where(np.array(labels_dict[n][j])==-6)[0]))
     
-    evaluation_matrices[n] = evaluation_matrix
     evaluation_matrices_W[n] = evaluation_matrix_W
     evaluation_matrices_top2[n] = evaluation_matrix_top2
     evaluation_matrices_top1[n] = evaluation_matrix_top1
 
 
 # -
-
-## get inputs to BDT
-def get_features(jets, electrons, muons, permutations_dict):
-    '''
-    Calculate features for each of the 12 combinations per event
-    
-    Args:
-        jets: selected jets
-        electrons: selected electrons
-        muons: selected muons
-        permutations_dict: which permutations to consider for each number of jets in an event
-    
-    Returns:
-        features (flattened to remove event level)
-    '''
-    
-    # calculate number of jets in each event
-    njet = ak.num(jets).to_numpy()
-    # don't consider every jet for events with high jet multiplicity
-    njet[njet>max(permutations_dict.keys())] = max(permutations_dict.keys())
-    # create awkward array of permutation indices
-    perms = ak.Array([permutations_dict[n] for n in njet])
-    perm_counts = ak.num(perms)
-    
-    
-    #### calculate features ####
-    #### calculate features ####
-    features = np.zeros((sum(perm_counts),20))
-    
-    # grab lepton info
-    leptons = ak.flatten(ak.concatenate((electrons, muons),axis=1),axis=-1)
-
-    feature_count = 0
-    
-    # delta R between top1 and lepton
-    features[:,0] = ak.flatten(np.sqrt((leptons.eta - jets[perms[...,3]].eta)**2 + 
-                                       (leptons.phi - jets[perms[...,3]].phi)**2)).to_numpy()
-
-    
-    #delta R between the two W
-    features[:,1] = ak.flatten(np.sqrt((jets[perms[...,0]].eta - jets[perms[...,1]].eta)**2 + 
-                                       (jets[perms[...,0]].phi - jets[perms[...,1]].phi)**2)).to_numpy()
-
-    #delta R between W and top2
-    features[:,2] = ak.flatten(np.sqrt((jets[perms[...,0]].eta - jets[perms[...,2]].eta)**2 + 
-                                       (jets[perms[...,0]].phi - jets[perms[...,2]].phi)**2)).to_numpy()
-    features[:,3] = ak.flatten(np.sqrt((jets[perms[...,1]].eta - jets[perms[...,2]].eta)**2 + 
-                                       (jets[perms[...,1]].phi - jets[perms[...,2]].phi)**2)).to_numpy()
-
-    # combined mass of top1 and lepton
-    features[:,4] = ak.flatten((leptons + jets[perms[...,3]]).mass).to_numpy()
-
-    # combined mass of W
-    features[:,5] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]]).mass).to_numpy()
-
-    # combined mass of W and top2
-    features[:,6] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
-                                 jets[perms[...,2]]).mass).to_numpy()
-    
-    feature_count+=1
-    # combined pT of W and top2
-    features[:,7] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
-                                 jets[perms[...,2]]).pt).to_numpy()
-
-
-    # pt of every jet
-    features[:,8] = ak.flatten(jets[perms[...,0]].pt).to_numpy()
-    features[:,9] = ak.flatten(jets[perms[...,1]].pt).to_numpy()
-    features[:,10] = ak.flatten(jets[perms[...,2]].pt).to_numpy()
-    features[:,11] = ak.flatten(jets[perms[...,3]].pt).to_numpy()
-
-    # btagCSVV2 of every jet
-    features[:,12] = ak.flatten(jets[perms[...,0]].btagCSVV2).to_numpy()
-    features[:,13] = ak.flatten(jets[perms[...,1]].btagCSVV2).to_numpy()
-    features[:,14] = ak.flatten(jets[perms[...,2]].btagCSVV2).to_numpy()
-    features[:,15] = ak.flatten(jets[perms[...,3]].btagCSVV2).to_numpy()
-    
-    # qgl of every jet
-    features[:,16] = ak.flatten(jets[perms[...,0]].qgl).to_numpy()
-    features[:,17] = ak.flatten(jets[perms[...,1]].qgl).to_numpy()
-    features[:,18] = ak.flatten(jets[perms[...,2]].qgl).to_numpy()
-    features[:,19] = ak.flatten(jets[perms[...,3]].qgl).to_numpy()
-
-    return features, perm_counts
-
 
 def filterEvents(jets, electrons, muons, genpart, even, nmin, nmax, reconstructable=True):
 
@@ -361,10 +225,10 @@ combination_labels = np.array(combination_labels)
 print("calculated labels")
     
 # get features
-features, perm_counts = get_features(jets, 
-                                     electrons, 
-                                     muons, 
-                                     permutations_dict)
+features, perm_counts = utils.get_features(jets, 
+                                           electrons, 
+                                           muons, 
+                                           permutations_dict)
 
 current_even = np.repeat(current_even, perm_counts)
 print("calculated features")
@@ -480,10 +344,10 @@ for n in range(4,MAX_N_JETS+1):
     print("    calculated labels")
     
     # get features
-    features, perm_counts = get_features(jets, 
-                                         electrons, 
-                                         muons, 
-                                         permutations_dict)
+    features, perm_counts = utils.get_features(jets, 
+                                               electrons, 
+                                               muons, 
+                                               permutations_dict)
     current_even = np.repeat(current_even, perm_counts)
     print("    calculated features")
 
@@ -643,10 +507,10 @@ for MAX_N_JETS in MAX_N_JETS_LIST:
     print("    calculated perms")
     
     # get features
-    features, perm_counts = get_features(jets, 
-                                         electrons, 
-                                         muons, 
-                                         permutations_dict)
+    features, perm_counts = utils.get_features(jets, 
+                                               electrons, 
+                                               muons, 
+                                               permutations_dict)
     current_even = np.repeat(current_even, perm_counts)
     print("    calculated features")
 

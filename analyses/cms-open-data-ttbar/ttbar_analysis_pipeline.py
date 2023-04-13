@@ -94,7 +94,7 @@ logging.getLogger("cabinetry").setLevel(logging.INFO)
 ### GLOBAL CONFIGURATION
 
 # input files per process, set to e.g. 10 (smaller number = faster)
-N_FILES_MAX_PER_SAMPLE = 20
+N_FILES_MAX_PER_SAMPLE = -1
 
 # enable Dask (currently will not work with Triton inference)
 USE_DASK = True
@@ -779,6 +779,10 @@ plt.legend(frameon=False)
 plt.title(">= 4 jets, >= 2 b-tags")
 plt.xlabel("$m_{bjj}$ [Gev] (Trijet Combination)");
 
+# Our top reconstruction approach ($bjj$ system with largest $p_T$) has worked!
+#
+# Let's also have a look at some of the observables we obtain using the jet-parton assignment BDT:
+
 # +
 # ml observable plots
 
@@ -795,8 +799,6 @@ plt.xlabel("$\Delta R$ between Lepton and $top_{lepton}$ Jet")
 plt.show()
 # -
 
-# Our top reconstruction approach ($bjj$ system with largest $p_T$) has worked!
-#
 # Let's also have a look at some systematic variations:
 # - b-tagging, which we implemented as jet-kinematic dependent event weights,
 # - jet energy variations, which vary jet kinematics, resulting in acceptance effects and observable changes.
@@ -827,7 +829,7 @@ plt.show()
 # We'll save everything to disk for subsequent usage.
 # This also builds pseudo-data by combining events from the various simulation setups we have processed.
 
-utils.save_histograms(all_histograms["hist"], fileset, "histograms_noml.root", ml=False)
+utils.save_histograms(all_histograms["hist"], fileset, "histograms_noml.root")
 utils.save_ml_histograms(all_histograms["mlhist"], fileset, "histograms_ml.root")
 
 # ### Statistical inference
@@ -874,7 +876,7 @@ figs[1]["figure"]
 # We can see very good post-fit agreement.
 
 model_prediction_postfit = cabinetry.model_utils.prediction(model, fit_results=fit_results)
-figs = cabinetry.visualize.data_mc(model_prediction_postfit, data, close_figure=True)
+figs = cabinetry.visualize.data_mc(model_prediction_postfit, data, close_figure=True, config=config)
 figs[0]["figure"]
 
 figs[1]["figure"]
@@ -899,7 +901,7 @@ model_ml, data_ml = cabinetry.model_utils.model_and_data(ws_ml)
 # Let's view the model obtained using the ML observable before the fit:
 
 model_prediction = cabinetry.model_utils.prediction(model_ml)
-figs = cabinetry.visualize.data_mc(model_prediction, data_ml, close_figure=True, log_scale=False)
+figs = cabinetry.visualize.data_mc(model_prediction, data_ml, config=config_ml, close_figure=True, log_scale=False)
 figs[0]["figure"]
 
 figs[1]["figure"]

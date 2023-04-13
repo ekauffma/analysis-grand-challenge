@@ -9,9 +9,13 @@ Regions:
 
   - Name: "4j2b ML Top Mass"
     RegionPath: "4j2bML_a"
+    Variable: "ML Reconstructed Top Mass [GeV]"
+    Binning: [ 50.,  75., 100., 125., 150., 175., 200., 225., 250., 275., 300., 325., 350., 375., 400., 425., 450., 475., 500., 525., 550.]
     
   - Name: "4j2b ML Delta R"
     RegionPath: "4j2bML_b"
+    Variable: "ML Reconstructed Delta R between Lepton and $top_{lepton}$ Jet"
+    Binning: [0.  , 0.24, 0.48, 0.72, 0.96, 1.2 , 1.44, 1.68, 1.92, 2.16, 2.4, 2.64, 2.88, 3.12, 3.36, 3.6 , 3.84, 4.08, 4.32, 4.56, 4.8 , 5.04, 5.28, 5.52, 5.76, 6.  ]
 
 Samples:
   - Name: "Pseudodata"

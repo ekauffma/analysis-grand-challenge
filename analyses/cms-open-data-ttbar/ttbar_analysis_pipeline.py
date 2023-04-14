@@ -288,18 +288,35 @@ class TtbarAnalysis(processor.ProcessorABC):
             .StrCat([], name="variation", label="Systematic variation", growth=True)
             .Weight()
         )
+        
         self.disable_processing = disable_processing
         self.io_file_percent = io_file_percent
         
-        self.mlhist = (
-            hist.Hist.new.Reg(20, bin_low, bin_high, name="topmass", label="Reconstructed Top Mass [GeV]")
-            .Reg(25, 0, 6, name="lepton_deltar", label="$\Delta R$ between $top_{lepton}$ Jet and Lepton")
-            # .Reg(50, 0, 800, name="combined_pt", label="Combined $p_T$ of $top_{hadron}$ Jet and W Jets")
-            # .Reg(25, 0, 1, name="tophad_btag", label="btagCSVV2 of $top_{hadron}$ Jet")
-            .StrCat([], name="process", label="Process", growth=True)
-            .StrCat([], name="variation", label="Systematic variation", growth=True)
-            .Weight()
-        )
+        self.ml_hist_dict = {}
+        range_dict = {"deltar": [0,6], "mass": [50,550], "pt": [50,550], "btag": [0,1], "qgl": [-1,1]}
+        self.features = ["deltar_leptontoplep","deltar_w1w2","deltar_w1tophad","deltar_w2tophad","mass_leptontoplep","mass_w1w2",
+                    "mass_w1w2tophad","pt_w1w2tophad","pt_w1","pt_w2","pt_tophad","pt_toplep",
+                    "btag_w1","btag_w2","btag_tophad","btag_toplep","qgl_w1","qgl_w2","qgl_tophad","qgl_toplep"]
+        feature_descriptions = [
+            "$\Delta R$ between $top_{lepton}$ Jet and Lepton", "$\Delta R$ between the two W Jets", "$\Delta R$ between first W Jet and $top_{hadron}$ Jet", "$\Delta R$ between second W Jet and $top_{hadron}$ Jet",
+            "Combined Mass of $top_{lepton}$ Jet and Lepton [GeV]", "Combined Mass of the two W Jets [GeV]", "Combined Mass of $top_{hadron}$ Jet and the two W Jets [GeV]",
+            "Combined $p_T$ of $top_{hadron}$ Jet and the two W Jets [GeV]",
+            "$p_T$ of the first W Jet [GeV]", "$p_T$ of the second W Jet [GeV]", "$p_T$ of the $top_{hadron}$ Jet [GeV]", "$p_T$ of the $top_{lepton}$ Jet [GeV]",
+            "btagCSVV2 of the first W Jet [GeV]", "btagCSVV2 of the second W Jet [GeV]", "btagCSVV2 of the $top_{hadron}$ Jet [GeV]", "btagCSVV2 of the $top_{lepton}$ Jet [GeV]",
+            "qgl of the first W Jet [GeV]", "qgl of the second W Jet [GeV]", "qgl of the $top_{hadron}$ Jet [GeV]", "qgl of the $top_{lepton}$ Jet [GeV]",
+        ]
+        for i in range(len(self.features)):
+            var_type = self.features[i].split("_")[0]
+            self.ml_hist_dict[f"hist_{self.features[i]}"] = (
+                hist.Hist.new.Reg(num_bins, 
+                                  range_dict[var_type][0], 
+                                  range_dict[var_type][1], 
+                                  name="observable", 
+                                  label=feature_descriptions[i])
+                .StrCat([], name="process", label="Process", growth=True)
+                .StrCat([], name="variation", label="Systematic variation", growth=True)
+                .Weight()
+            )
         
         # for ML inference
         self.use_triton = use_triton
@@ -363,7 +380,10 @@ class TtbarAnalysis(processor.ProcessorABC):
             return self.only_do_IO(events)
 
         histogram = self.hist.copy()
-        histogram_ml = self.mlhist.copy()
+        ml_hist_dict = {}
+        for i in range(len(self.features)):
+            ml_hist_dict[f"hist_{self.features[i]}"] = self.ml_hist_dict[f"hist_{self.features[i]}"].copy()
+
 
         process = events.metadata["process"]  # "ttbar" etc.
         variation = events.metadata["variation"]  # "nominal" etc.
@@ -509,15 +529,22 @@ class TtbarAnalysis(processor.ProcessorABC):
                         results = np.zeros(features.shape[0])
                         if len(features[even_perm])>0:
                             results[even_perm] = self.xgboost_model_odd.predict_proba(
+                             # results[even_perm] = xgboost_model_odd.predict_proba(
                                 features[even_perm,:])[:, 1]
                         if len(features[np.invert(even_perm)])>0:
                             results[np.invert(even_perm)] = results_odd = self.xgboost_model_even.predict_proba(
+                            # results[np.invert(even_perm)] = results_odd = xgboost_model_even.predict_proba(
                                 features[np.invert(even_perm),:])[:, 1]
                         
                     results = ak.unflatten(results, perm_counts)
                     which_combination = ak.argmax(results,axis=1)
                     features_unflattened = ak.unflatten(features, perm_counts)
-                    features_correct = ak.flatten(features_unflattened[ak.from_regular(which_combination[:, np.newaxis])])
+                    
+                    features = ak.flatten(features_unflattened[ak.from_regular(which_combination[:, np.newaxis])])
+                    
+                    del(results)
+                    del(which_combination)
+                    del(features_unflattened)
                     
                 ### histogram filling
                 if pt_var == "pt_nominal":
@@ -527,12 +554,9 @@ class TtbarAnalysis(processor.ProcessorABC):
                             variation=variation, weight=xsec_weight
                         )
                     if region=="4j2b":
-                        histogram_ml.fill(topmass=features_correct[...,6], 
-                                          lepton_deltar=features_correct[...,0], 
-                                          # combined_pt=features_correct[...,7], 
-                                          # tophad_btag=features_correct[...,14], 
-                                          process=process, variation=variation, weight=xsec_weight)
-
+                        for i in range(len(self.features)):
+                            ml_hist_dict[f"hist_{self.features[i]}"].fill(observable=features[...,i], process=process, variation=variation, weight=xsec_weight)
+            
                     if variation == "nominal":
                         # also fill weight-based variations for all nominal samples
                         for weight_name in events.systematics.fields:
@@ -546,13 +570,8 @@ class TtbarAnalysis(processor.ProcessorABC):
                                     variation=f"{weight_name}_{direction}", weight=xsec_weight*weight_variation
                                 )
                                 if region=="4j2b":
-                                    histogram_ml.fill(topmass=features_correct[...,6], 
-                                                      lepton_deltar=features_correct[...,0], 
-                                                      # combined_pt=features_correct[...,7], 
-                                                      # tophad_btag=features_correct[...,14], 
-                                                      process=process,  
-                                                      variation=f"{weight_name}_{direction}", 
-                                                      weight=xsec_weight*weight_variation)
+                                    for i in range(len(self.features)):
+                                        ml_hist_dict[f"hist_{self.features[i]}"].fill(observable=features[...,i], process=process, variation=f"{weight_name}_{direction}", weight=xsec_weight*weight_variation)
 
                         # calculate additional systematics: b-tagging variations
                         for i_var, weight_name in enumerate([f"btag_var_{i}" for i in range(4)]):
@@ -567,13 +586,8 @@ class TtbarAnalysis(processor.ProcessorABC):
                                     variation=f"{weight_name}_{direction}", weight=xsec_weight*weight_variation
                                 )
                                 if region=="4j2b":
-                                    histogram_ml.fill(topmass=features_correct[...,6], 
-                                                      lepton_deltar=features_correct[...,0], 
-                                                      # combined_pt=features_correct[...,7], 
-                                                      # tophad_btag=features_correct[...,14], 
-                                                      process=process,
-                                                      variation=f"{weight_name}_{direction}", 
-                                                      weight=xsec_weight*weight_variation)
+                                    for i in range(len(self.features)):
+                                        ml_hist_dict[f"hist_{self.features[i]}"].fill(observable=features[...,i], process=process, variation=f"{weight_name}_{direction}", weight=xsec_weight*weight_variation)
 
                 elif variation == "nominal":
                     # pT variations for nominal samples
@@ -582,16 +596,14 @@ class TtbarAnalysis(processor.ProcessorABC):
                             variation=pt_var, weight=xsec_weight
                         )
                     if region=="4j2b":
-                        histogram_ml.fill(topmass=features_correct[...,6], 
-                                          lepton_deltar=features_correct[...,0], 
-                                          # combined_pt=features_correct[...,7], 
-                                          # tophad_btag=features_correct[...,14], 
-                                          process=process, variation=pt_var, weight=xsec_weight)
+                        for i in range(len(self.features)):
+                            ml_hist_dict[f"hist_{self.features[i]}"].fill(observable=features[...,i], process=process, variation=pt_var, weight=xsec_weight)
 
-        output = {"nevents": {events.metadata["dataset"]: len(events)},
-                  "hist": histogram, 
-                  "mlhist": histogram_ml
-                 }
+        output = {
+            "nevents": {events.metadata["dataset"]: len(events)},
+            "hist": histogram, 
+            "ml_hist_dict": ml_hist_dict,
+        }
         
         if self.use_triton:
             triton_client.close()
@@ -710,23 +722,16 @@ else:
 t0 = time.monotonic()
 # processing
 all_histograms, metrics = run(fileset, treename, processor_instance=TtbarAnalysis(DISABLE_PROCESSING, IO_FILE_PERCENT, 
-                                                                                  USE_TRITON, model_even, model_odd,
-                                                                                  MODEL_NAME, MODEL_VERSION_EVEN, MODEL_VERSION_ODD, 
+                                                                                  USE_TRITON, 
+                                                                                  model_even, model_odd,
+                                                                                  # XGBOOST_MODEL_PATH_EVEN, XGBOOST_MODEL_PATH_ODD,
+                                                                                  MODEL_NAME, MODEL_VERSION_EVEN, XGBOOST_MODEL_PATH_ODD, 
                                                                                   TRITON_URL, permutations_dict)) 
 exec_time = time.monotonic() - t0
 
 # all_histograms = all_histograms["hist"]
 
 print(f"\nexecution took {exec_time:.2f} seconds")
-
-# +
-v1 = all_histograms["hist"].view().nbytes/1e6
-v2 = all_histograms["hist"].values().nbytes/1e6
-print(f"histogram: view: {v1} MB, values: {v2} MB")
-
-v1 = all_histograms["mlhist"].view().nbytes/1e6
-v2 = all_histograms["mlhist"].values().nbytes/1e6
-print(f"histogram_ml: view: {v1} MB, values: {v2} MB")
 
 # +
 # track metrics
@@ -783,20 +788,20 @@ plt.xlabel("$m_{bjj}$ [Gev] (Trijet Combination)");
 #
 # Let's also have a look at some of the observables we obtain using the jet-parton assignment BDT:
 
-# +
+# + tags=[]
 # ml observable plots
 
-all_histograms["mlhist"][:, :, :, "nominal"].stack("process").project("topmass").plot(stack=True, histtype="fill", linewidth=1, edgecolor="grey")
-plt.legend(frameon=False)
-plt.title("ML Observable")
-plt.xlabel("$m_{bjj}$ [Gev]")
-plt.show()
+range_dict = {"deltar": [0,6], "mass": [50,550], "pt": [50,550], "btag": [0,1], "qgl": [-1,1]}
+features = ["deltar_leptontoplep","deltar_w1w2","deltar_w1tophad","deltar_w2tophad","mass_leptontoplep","mass_w1w2",
+            "mass_w1w2tophad","pt_w1w2tophad","pt_w1","pt_w2","pt_tophad","pt_toplep",
+            "btag_w1","btag_w2","btag_tophad","btag_toplep","qgl_w1","qgl_w2","qgl_tophad","qgl_toplep"]
 
-all_histograms["mlhist"][:, :, :, "nominal"].stack("process").project("lepton_deltar").plot(stack=True, histtype="fill", linewidth=1, edgecolor="grey")
-plt.legend(frameon=False)
-plt.title("ML Observable")
-plt.xlabel("$\Delta R$ between Lepton and $top_{lepton}$ Jet")
-plt.show()
+for i in range(len(features)):
+    print(all_histograms['ml_hist_dict'][f'hist_{features[i]}'][:, :, "nominal"].stack("process").project("observable"))
+    all_histograms['ml_hist_dict'][f'hist_{features[i]}'][:, :, "nominal"].stack("process").project("observable").plot(stack=True, histtype="fill", linewidth=1, edgecolor="grey")
+    plt.legend(frameon=False)
+    plt.title(f"ML Observable #{i}")
+    plt.show()
 # -
 
 # Let's also have a look at some systematic variations:
@@ -830,7 +835,7 @@ plt.show()
 # This also builds pseudo-data by combining events from the various simulation setups we have processed.
 
 utils.save_histograms(all_histograms["hist"], fileset, "histograms_noml.root")
-utils.save_ml_histograms(all_histograms["mlhist"], fileset, "histograms_ml.root")
+utils.save_ml_histograms(all_histograms["ml_hist_dict"], fileset, "histograms_ml.root")
 
 # ### Statistical inference
 #
@@ -902,18 +907,42 @@ model_ml, data_ml = cabinetry.model_utils.model_and_data(ws_ml)
 
 model_prediction = cabinetry.model_utils.prediction(model_ml)
 figs = cabinetry.visualize.data_mc(model_prediction, data_ml, config=config_ml, close_figure=True, log_scale=False)
+
+# + tags=[]
 figs[0]["figure"]
+# -
 
 figs[1]["figure"]
+
+figs[2]["figure"]
+
+figs[3]["figure"]
+
+figs[4]["figure"]
+
+figs[5]["figure"]
+
+figs[6]["figure"]
 
 # Now applying the fit results from the trijet combination observable to the ML observable, let's see whether we have good data-MC agreement:
 
 fit_results_mod = cabinetry.model_utils.match_fit_results(model_ml, fit_results)
 model_prediction_postfit = cabinetry.model_utils.prediction(model_ml, fit_results=fit_results_mod)
 figs = cabinetry.visualize.data_mc(model_prediction_postfit, data_ml, close_figure=True, config=config_ml, log_scale=False)
+
 figs[0]["figure"]
 
 figs[1]["figure"]
+
+figs[2]["figure"]
+
+figs[3]["figure"]
+
+figs[4]["figure"]
+
+figs[5]["figure"]
+
+figs[6]["figure"]
 
 # We still see very good post-fit agreement here.
 
@@ -927,3 +956,5 @@ figs[1]["figure"]
 # Please do not hesitate to get in touch if you would like to join the effort, or are interested in re-implementing (pieces of) the pipeline with different tools!
 #
 # Our mailing list is analysis-grand-challenge@iris-hep.org, sign up via the [Google group](https://groups.google.com/a/iris-hep.org/g/analysis-grand-challenge).
+
+

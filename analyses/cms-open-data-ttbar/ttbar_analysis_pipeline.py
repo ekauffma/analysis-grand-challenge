@@ -42,15 +42,14 @@ import asyncio
 import logging
 import os
 import time
-
 import awkward as ak
 import cabinetry
+import pyhf
 from coffea import processor
 from coffea.nanoevents import NanoAODSchema
 from servicex import ServiceXDataset
 from func_adl import ObjectStream
 from func_adl_servicex import ServiceXSourceUpROOT
-
 import hist
 import json
 import matplotlib.pyplot as plt
@@ -94,7 +93,7 @@ logging.getLogger("cabinetry").setLevel(logging.INFO)
 ### GLOBAL CONFIGURATION
 
 # input files per process, set to e.g. 10 (smaller number = faster)
-N_FILES_MAX_PER_SAMPLE = -1
+N_FILES_MAX_PER_SAMPLE = 5
 
 # enable Dask (currently will not work with Triton inference)
 USE_DASK = True
@@ -112,7 +111,7 @@ AF = "coffea_casa"
 ### BENCHMARKING-SPECIFIC SETTINGS
 
 # chunk size to use
-CHUNKSIZE = 200_000
+CHUNKSIZE = 100_000
 
 # metadata to propagate through to metrics
 AF_NAME = "coffea_casa"  # "ssl-dev" allows for the switch to local data on /data
@@ -272,9 +271,9 @@ def jet_pt_resolution(pt):
 
 
 class TtbarAnalysis(processor.ProcessorABC):
+    
     def __init__(self, disable_processing, io_file_percent, use_triton, xgboost_model_even, xgboost_model_odd, 
                  model_name, model_vers_even, model_vers_odd, url, permutations_dict):
-        
         # initialize histogram
         num_bins = 25
         bin_low = 50
@@ -288,15 +287,16 @@ class TtbarAnalysis(processor.ProcessorABC):
             .StrCat([], name="variation", label="Systematic variation", growth=True)
             .Weight()
         )
-        
+
         self.disable_processing = disable_processing
         self.io_file_percent = io_file_percent
-        
+
         self.ml_hist_dict = {}
-        range_dict = {"deltar": [0,6], "mass": [50,550], "pt": [50,550], "btag": [0,1], "qgl": [-1,1]}
+        bin_ranges = [[0,6],[0,6],[0,6],[0,6],[50,300],[50,300],[50,550],[50,550],[25,300],[25,300],[25,300],[25,300],
+                      [0,1],[0,1],[0,1],[0,1],[-1,1],[-1,1],[-1,1],[-1,1]]
         self.features = ["deltar_leptontoplep","deltar_w1w2","deltar_w1tophad","deltar_w2tophad","mass_leptontoplep","mass_w1w2",
-                    "mass_w1w2tophad","pt_w1w2tophad","pt_w1","pt_w2","pt_tophad","pt_toplep",
-                    "btag_w1","btag_w2","btag_tophad","btag_toplep","qgl_w1","qgl_w2","qgl_tophad","qgl_toplep"]
+                         "mass_w1w2tophad","pt_w1w2tophad","pt_w1","pt_w2","pt_tophad","pt_toplep",
+                         "btag_w1","btag_w2","btag_tophad","btag_toplep","qgl_w1","qgl_w2","qgl_tophad","qgl_toplep"]
         feature_descriptions = [
             "$\Delta R$ between $top_{lepton}$ Jet and Lepton", "$\Delta R$ between the two W Jets", "$\Delta R$ between first W Jet and $top_{hadron}$ Jet", "$\Delta R$ between second W Jet and $top_{hadron}$ Jet",
             "Combined Mass of $top_{lepton}$ Jet and Lepton [GeV]", "Combined Mass of the two W Jets [GeV]", "Combined Mass of $top_{hadron}$ Jet and the two W Jets [GeV]",
@@ -306,11 +306,10 @@ class TtbarAnalysis(processor.ProcessorABC):
             "qgl of the first W Jet [GeV]", "qgl of the second W Jet [GeV]", "qgl of the $top_{hadron}$ Jet [GeV]", "qgl of the $top_{lepton}$ Jet [GeV]",
         ]
         for i in range(len(self.features)):
-            var_type = self.features[i].split("_")[0]
             self.ml_hist_dict[f"hist_{self.features[i]}"] = (
                 hist.Hist.new.Reg(num_bins, 
-                                  range_dict[var_type][0], 
-                                  range_dict[var_type][1], 
+                                  bin_ranges[i][0], 
+                                  bin_ranges[i][1], 
                                   name="observable", 
                                   label=feature_descriptions[i])
                 .StrCat([], name="process", label="Process", growth=True)
@@ -790,10 +789,8 @@ plt.xlabel("$m_{bjj}$ [Gev] (Trijet Combination)");
 
 # + tags=[]
 # ml observable plots
-
-range_dict = {"deltar": [0,6], "mass": [50,550], "pt": [50,550], "btag": [0,1], "qgl": [-1,1]}
-features = ["deltar_leptontoplep","deltar_w1w2","deltar_w1tophad","deltar_w2tophad","mass_leptontoplep","mass_w1w2",
-            "mass_w1w2tophad","pt_w1w2tophad","pt_w1","pt_w2","pt_tophad","pt_toplep",
+features = ["deltar_leptontoplep","deltar_w1w2","deltar_w1tophad","deltar_w2tophad","combinedmass_leptontoplep","combinedmass_w1w2",
+            "combinedmass_w1w2tophad","combinedpt_w1w2tophad","pt_w1","pt_w2","pt_tophad","pt_toplep",
             "btag_w1","btag_w2","btag_tophad","btag_toplep","qgl_w1","qgl_w2","qgl_tophad","qgl_toplep"]
 
 for i in range(len(features)):
@@ -889,62 +886,39 @@ figs[1]["figure"]
 # ### ML Validation
 # We used two methods to reconstruct the top mass: choosing the three-jet system with the highest $p_T$ and choosing the three jets based on the output from out boosted decision tree. We can further validate our results by applying the above fit to the ML variable and checking for good agreement.
 
+# +
 # load the ml workspace (uses the ml observable instead of previous method)
 config_ml = cabinetry.configuration.load("cabinetry_config_ml.yml")
 cabinetry.templates.collect(config_ml)
 cabinetry.templates.postprocess(config_ml)  # optional post-processing (e.g. smoothing)
+
 ws_ml = cabinetry.workspace.build(config_ml)
-cabinetry.workspace.save(ws_ml, "workspace_ml.json")
+ws_pruned = pyhf.Workspace(ws_ml).prune(channels=["Feature3", "Feature8", "Feature9", 
+                                                  "Feature10", "Feature11", "Feature12", 
+                                                  "Feature13", "Feature14", "Feature15", 
+                                                  "Feature16", "Feature17", "Feature18", 
+                                                  "Feature19"])
 
-model_ml, data_ml = cabinetry.model_utils.model_and_data(ws_ml)
+cabinetry.workspace.save(ws_pruned, "workspace_ml.json")
+# -
 
-# We can see that we've added a channel to the workspace:
+model_ml, data_ml = cabinetry.model_utils.model_and_data(ws_pruned)
+
+# We have a channel for each ML observable:
 
 # don't need other channels
 # !pyhf inspect workspace_ml.json | head -n 20
 
-# Let's view the model obtained using the ML observable before the fit:
-
 model_prediction = cabinetry.model_utils.prediction(model_ml)
-figs = cabinetry.visualize.data_mc(model_prediction, data_ml, config=config_ml, close_figure=True, log_scale=False)
-
-# + tags=[]
-figs[0]["figure"]
-# -
-
-figs[1]["figure"]
-
-figs[2]["figure"]
-
-figs[3]["figure"]
-
-figs[4]["figure"]
-
-figs[5]["figure"]
-
-figs[6]["figure"]
-
-# Now applying the fit results from the trijet combination observable to the ML observable, let's see whether we have good data-MC agreement:
-
 fit_results_mod = cabinetry.model_utils.match_fit_results(model_ml, fit_results)
 model_prediction_postfit = cabinetry.model_utils.prediction(model_ml, fit_results=fit_results_mod)
-figs = cabinetry.visualize.data_mc(model_prediction_postfit, data_ml, close_figure=True, config=config_ml, log_scale=False)
 
-figs[0]["figure"]
+# Let's view the model before and after applying the previous fit for each observable:
 
-figs[1]["figure"]
-
-figs[2]["figure"]
-
-figs[3]["figure"]
-
-figs[4]["figure"]
-
-figs[5]["figure"]
-
-figs[6]["figure"]
-
-# We still see very good post-fit agreement here.
+# + tags=[]
+# plots of ML observables before and after fit
+figs = utils.plot_data_mc(model_prediction, model_prediction_postfit, data_ml, config_ml)
+# -
 
 # ### What is next?
 #
@@ -956,5 +930,3 @@ figs[6]["figure"]
 # Please do not hesitate to get in touch if you would like to join the effort, or are interested in re-implementing (pieces of) the pipeline with different tools!
 #
 # Our mailing list is analysis-grand-challenge@iris-hep.org, sign up via the [Google group](https://groups.google.com/a/iris-hep.org/g/analysis-grand-challenge).
-
-

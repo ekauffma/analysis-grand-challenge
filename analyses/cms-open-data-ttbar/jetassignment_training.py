@@ -89,21 +89,16 @@ USE_MLFLOW = True
 MODEL_LOGGING = True
 
 # number of folds for cross-validation
-N_FOLD = 5
+N_FOLD = 2
 
 # number of trials (per model) for hyperparameter optimization. Total number of trials will be 2*N_TRIALS
-N_TRIALS = 5
+N_TRIALS = 20
 
 # name to use for saving model to triton server
 MODEL_NAME = "sigbkg_bdt"
 
 # if True, write over previous versions of model in triton directory
 WRITE_OVER = True
-
-# number of events to train with for each model (N events = 12*N dataset)
-N_EVENTS_TRAIN = -1
-
-N_FEATURES = 20
 
 # %%
 # get dictionaries for permutation indices, associated labels, and evaluation matrices
@@ -158,7 +153,6 @@ def training_filter(jets, electrons, muons, genparts, even):
     # match jets to nearest valid genPart candidate
     nearest_genpart = jets.nearest(genparts, threshold=0.4)
     nearest_parent = nearest_genpart.distinctParent # parent of matched particle
-
     parent_pdgid = nearest_parent.pdgId # pdgId of parent particle
     grandchild_pdgid = nearest_parent.distinctChildren.distinctChildren.pdgId # pdgId of particle's parent's grandchildren
 
@@ -245,7 +239,6 @@ def get_training_set(jets, electrons, muons, labels, permutations_dict, labels_d
     features[:,6] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
                                 jets[perms[...,2]]).mass).to_numpy()
     
-    feature_count+=1
     # combined pT of W and top_hadron
     features[:,7] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] + 
                                 jets[perms[...,2]]).pt).to_numpy()
@@ -517,19 +510,19 @@ h.fill(deltar = none_correct[:,3], category="tophad_W", truthlabel="No Matches C
 fig,ax = plt.subplots(1,1,figsize=(8,4))
 h[0j::hist.rebin(2), :, "toplep_lepton"].plot(density=True, ax=ax)
 ax.legend(legend_list)
-ax.set_title("$\Delta R$ between top_lepton jet and lepton")
+ax.set_title("$\Delta R$ between $top_{lepton}$ jet and lepton")
 fig.show()
 
 fig,ax = plt.subplots(1,1,figsize=(8,4))
 h[0j::hist.rebin(2), :, "W_W"].plot(density=True, ax=ax)
 ax.legend(legend_list)
-ax.set_title("$\Delta R$ between the two W jets")
+ax.set_title("$\Delta R$ between the two $W$ jets")
 fig.show()
 
 fig,ax = plt.subplots(1,1,figsize=(8,4))
 h[0j::hist.rebin(2), :, "tophad_W"].plot(density=True, ax=ax)
 ax.legend(legend_list)
-ax.set_title("$\Delta R$ between W jet and top_hadron jet")
+ax.set_title("$\Delta R$ between $W$ jet and $top_{hadron}$ jet")
 fig.show()
 
 # %% tags=[]
@@ -564,21 +557,21 @@ h.fill(combinedmass = none_correct[:,6], category="tophad_W_W", truthlabel="No M
 fig,ax = plt.subplots(1,1,figsize=(8,4))
 h[:, :, "toplep_lepton"].plot(density=True, ax=ax)
 ax.legend(legend_list[:-1])
-ax.set_title("Combined mass of top_lepton jet and lepton")
+ax.set_title("Combined mass of $top_{lepton}$ jet and lepton")
 ax.set_xlim([0,400])
 fig.show()
 
 fig,ax = plt.subplots(1,1,figsize=(8,4))
 h[:, :, "W_W"].plot(density=True, ax=ax)
 ax.legend(legend_list[:-1])
-ax.set_title("Combined mass of the two W jets")
+ax.set_title("Combined mass of the two $W$ jets")
 ax.set_xlim([0,400])
 fig.show()
 
 fig,ax = plt.subplots(1,1,figsize=(8,4))
 h[:, :, "tophad_W_W"].plot(density=True, ax=ax)
 ax.legend(legend_list)
-ax.set_title("Combined mass of W jets and top_hadron jet (Reconstructed Top Mass)")
+ax.set_title("Combined mass of $W$ jets and $top_{hadron}$ jet (Reconstructed Top Mass)")
 ax.set_xlim([0,600])
 fig.show()
 
@@ -776,7 +769,7 @@ labels = output['labels'].value
 labels[labels==-1]=0 # partially correct = wrong
 even = output['even'].value
 
-features = features.reshape((int(features.shape[0]/12),12,N_FEATURES))
+features = features.reshape((int(features.shape[0]/12),12,20))
 labels = labels.reshape((int(labels.shape[0]/12),12))
 
 shuffle_indices = np.array(range(features.shape[0])).astype(int)
@@ -788,13 +781,13 @@ which_combination = np.argmax(labels,axis=-1)
 even = even[shuffle_indices]
 
 features_even = features[even]
-features_even = features_even.reshape((int(12*features_even.shape[0]),N_FEATURES))
+features_even = features_even.reshape((int(12*features_even.shape[0]),20))
 labels_even = labels[even]
 labels_even = labels_even.reshape((int(12*labels_even.shape[0]),))
 which_combination_even = which_combination[even]
 
 features_odd = features[np.invert(even)]
-features_odd = features_odd.reshape((int(12*features_odd.shape[0]),N_FEATURES))
+features_odd = features_odd.reshape((int(12*features_odd.shape[0]),20))
 labels_odd = labels[np.invert(even)]
 labels_odd = labels_odd.reshape((int(12*labels_odd.shape[0]),))
 which_combination_odd = which_combination[np.invert(even)]
@@ -802,11 +795,14 @@ which_combination_odd = which_combination[np.invert(even)]
 print("features_even.shape = ", features_even.shape)
 print("features_odd.shape = ", features_odd.shape)
 
+# %% tags=[]
+N_TRIALS = 100
+
 # %%
 # set up trials
 if USE_MLFLOW:
     
-    os.environ['MLFLOW_TRACKING_TOKEN'] = "eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJ6eXdjRVdfd2hOSzBTMDJLS3Nxd0Q0cGNjTXJpc1BSUUJDcEo4T0o1Rm40In0.eyJleHAiOjE2ODA3MzQzMTgsImlhdCI6MTY4MDY5ODMyMiwiYXV0aF90aW1lIjoxNjgwNjk4MzE4LCJqdGkiOiI5YjZlY2YxNy0xY2Q2LTRiMDctYWM5MS0wZjZlOTc0ODcwMmEiLCJpc3MiOiJodHRwczovL2tleWNsb2FrLnNvZnR3YXJlLWRldi5uY3NhLmlsbGlub2lzLmVkdS9yZWFsbXMvbWxmbG93IiwiYXVkIjpbIm1sZmxvdy1kZW1vIiwiYWNjb3VudCJdLCJzdWIiOiIyOTdhM2ExNS02Nzc0LTQ0NDItOGVjNy0zNzBlNmVhNzM2MWIiLCJ0eXAiOiJCZWFyZXIiLCJhenAiOiJtbGZsb3ctZGVtbyIsInNlc3Npb25fc3RhdGUiOiJhN2ZkYTAxNy05MWI3LTQwYjUtOTAwMS1mNjlmZjVhM2NkY2QiLCJzY29wZSI6InByb2ZpbGUgZ3JvdXBzIGVtYWlsIiwic2lkIjoiYTdmZGEwMTctOTFiNy00MGI1LTkwMDEtZjY5ZmY1YTNjZGNkIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsIm5hbWUiOiJFbGxpb3R0IEthdWZmbWFuIiwiZ3JvdXBzIjpbIi9ncnBfamlyYV91c2VycyIsIi9zZF9tbGZsb3ciLCIvYWxsX3VzZXJzIiwiL2ppcmEtdXNlcnMiLCIvYWxsX2hwY191c2VyX3NwbyIsIm9mZmxpbmVfYWNjZXNzIiwiZGVmYXVsdC1yb2xlcy1tbGZsb3ciLCJ1bWFfYXV0aG9yaXphdGlvbiJdLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJla2F1ZmZtYSIsImdpdmVuX25hbWUiOiJFbGxpb3R0IiwiZmFtaWx5X25hbWUiOiJLYXVmZm1hbiIsImVtYWlsIjoiZWxtYWthODcwMEBnbWFpbC5jb20ifQ.CufX8VLuC5o5UfdpXks_xJJLCyY_thcjmn6aqNcAoX0J1P9azA6fNjb1raGcLkSegzM-N_e44yyK3b4i3woVeXJ-oSsT6k9OZR6Cz-7DVeajonsSaZ4pYzMNkffcQyOgcZ2pWvx-niYblqHxObZQbdPa7WPxAaeU419q-YOgLxBO9boS7BHBgXLHsoGamK1JE9mFEXudAmq13pg7JvhSzehOeyPEkqceL9IHOcyBxL80OHp4s1ygfC1qmhXF3MIfs0WdJaBLF0nm_tWPvgQ5nblzdPOP8ompvYrzI4cOJJjMxzPBp2mw5BKnuSRGSzR6IT2eUzxtyLzZLKK6iysz_Q"
+    os.environ['MLFLOW_TRACKING_TOKEN'] = "eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJ6eXdjRVdfd2hOSzBTMDJLS3Nxd0Q0cGNjTXJpc1BSUUJDcEo4T0o1Rm40In0.eyJleHAiOjE2ODE5MjgwMTgsImlhdCI6MTY4MTg5MjAyNCwiYXV0aF90aW1lIjoxNjgxODkyMDE4LCJqdGkiOiIwZGUzMTYwZi0xZjlkLTRjMTMtOGE5Mi1kMmUwMWM0MDEwOTMiLCJpc3MiOiJodHRwczovL2tleWNsb2FrLnNvZnR3YXJlLWRldi5uY3NhLmlsbGlub2lzLmVkdS9yZWFsbXMvbWxmbG93IiwiYXVkIjpbIm1sZmxvdy1kZW1vIiwiYWNjb3VudCJdLCJzdWIiOiIyOTdhM2ExNS02Nzc0LTQ0NDItOGVjNy0zNzBlNmVhNzM2MWIiLCJ0eXAiOiJCZWFyZXIiLCJhenAiOiJtbGZsb3ctZGVtbyIsInNlc3Npb25fc3RhdGUiOiI0OTI1MzY4OS1jYzlhLTQxNGUtYmZmNi03NDU5YWFlMGYwYmEiLCJzY29wZSI6InByb2ZpbGUgZ3JvdXBzIGVtYWlsIiwic2lkIjoiNDkyNTM2ODktY2M5YS00MTRlLWJmZjYtNzQ1OWFhZTBmMGJhIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsIm5hbWUiOiJFbGxpb3R0IEthdWZmbWFuIiwiZ3JvdXBzIjpbIi9ncnBfamlyYV91c2VycyIsIi9zZF9tbGZsb3ciLCIvYWxsX3VzZXJzIiwiL2ppcmEtdXNlcnMiLCIvYWxsX2hwY191c2VyX3NwbyIsIm9mZmxpbmVfYWNjZXNzIiwiZGVmYXVsdC1yb2xlcy1tbGZsb3ciLCJ1bWFfYXV0aG9yaXphdGlvbiJdLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJla2F1ZmZtYSIsImdpdmVuX25hbWUiOiJFbGxpb3R0IiwiZmFtaWx5X25hbWUiOiJLYXVmZm1hbiIsImVtYWlsIjoiZWxtYWthODcwMEBnbWFpbC5jb20ifQ.ApyII7gS2hkqGXiUgkQbt7O6IAM7p98Y3rMu65bBKFx2LXlGoArl-CvKQWgIUdFLXqH2w3GU1erHC9La9kmz-2rR7eRFTBKVOI-XXUOHAxZfBDbXU0_bHz26NU4EmAjAuvY4yHzwB0pkSp3_FywiOFljY8hJ9zr0LV7Va5SK8yBk08UyxRorfhuRw1yiUMpDn42AuNh4CrFW0nlJzWzJ8LygR_wKUmBG-uWdkBdlu4Z3Q4IPQ2l5ltP1C_nNx4dSt1HGGcceegkDz2TBEaVd-UIEjZGFSimiHoKc2rq4NeOoV6lt_Z6WqLF4P680WHysOCtJ1w92lG_b132UPzlvcg"
     os.environ['MLFLOW_TRACKING_URI'] = "https://mlflow-demo.software-dev.ncsa.illinois.edu"
     
     mlflow.set_tracking_uri('https://mlflow-demo.software-dev.ncsa.illinois.edu') 
@@ -819,15 +815,16 @@ if USE_MLFLOW:
 
     # create runs ahead of time (avoids conflicts when parallelizing mlflow logging)
     run_id_list=[]
-    for n in range(N_TRIALS*2):
+    # for n in range(N_TRIALS*2):
+    for n in range(N_TRIALS):
         run = MlflowClient().create_run(experiment_id=experiment_id, run_name=f"run-{n}")
         run_id_list.append(run.info.run_id)
 
 # %%
-sampler = ParameterSampler({'max_depth': np.arange(10,80,10,dtype=int), 
-                            'n_estimators': np.arange(300,500,50,dtype=int), 
-                            'learning_rate': np.logspace(-3, -1, 5),
-                            'min_child_weight': np.logspace(-1, 2, 20), 
+sampler = ParameterSampler({'max_depth': np.arange(1,81,10,dtype=int), 
+                            'n_estimators': np.arange(1,501,50,dtype=int), 
+                            'learning_rate': np.linspace(0.01, 1, 10),
+                            'min_child_weight': np.logspace(-1, 3, 20), 
                             'reg_lambda': [0, 0.25, 0.5, 0.75, 1], 
                             'reg_alpha': [0, 0.25, 0.5, 0.75, 1],
                             'gamma': np.logspace(-4, 1, 20),
@@ -836,19 +833,19 @@ sampler = ParameterSampler({'max_depth': np.arange(10,80,10,dtype=int),
                             random_state=2) 
 
 samples_even = list(sampler)
-samples_odd = list(sampler)
+# samples_odd = list(sampler)
 
 # add additional info to each trial
 for i in range(N_TRIALS):
     samples_even[i]['trial_num'] = i
     samples_even[i]['parity'] = 'even' # categorizes this trial as for even event numbers
     
-    samples_odd[i]['trial_num'] = i
-    samples_odd[i]['parity'] = 'odd' # categorizes this trial as for odd event numbers
+    # samples_odd[i]['trial_num'] = i
+    # samples_odd[i]['parity'] = 'odd' # categorizes this trial as for odd event numbers
     
     if USE_MLFLOW: 
         samples_even[i]['run_id'] = run_id_list[i]
-        samples_odd[i]['run_id'] = run_id_list[i+N_TRIALS]
+        # samples_odd[i]['run_id'] = run_id_list[i+N_TRIALS]
     
 print("Example of Trial Parameters: ")
 samples_even[0]
@@ -864,9 +861,9 @@ else:
 # %%
 def modified_cross_validation(model, 
                               features, labels, 
-                              evaluation_matrix, n_folds=2, N_FEATURES=20):
+                              evaluation_matrix, n_folds=2):
             
-    features = features.reshape((int(features.shape[0]/12),12,N_FEATURES))
+    features = features.reshape((int(features.shape[0]/12),12,20))
     labels = labels.reshape((int(labels.shape[0]/12),12))
     which_combination = np.argmax(labels, axis=-1)
         
@@ -891,7 +888,7 @@ def modified_cross_validation(model,
     for n in range(n_folds):
         
         features_test = features[splits[n]]
-        features_test = features_test.reshape((12*features_test.shape[0],N_FEATURES))
+        features_test = features_test.reshape((12*features_test.shape[0],20))
         labels_test = labels[splits[n]]
         labels_test = labels_test.reshape((12*labels_test.shape[0],))
         which_combination_test = which_combination[splits[n]]
@@ -899,7 +896,7 @@ def modified_cross_validation(model,
         train_ind = np.concatenate([splits[i] for i in range(n_folds) if not i==n])
         
         features_train = features[train_ind]
-        features_train = features_train.reshape((12*features_train.shape[0],N_FEATURES))
+        features_train = features_train.reshape((12*features_train.shape[0],20))
         labels_train = labels[train_ind]
         labels_train = labels_train.reshape((12*labels_train.shape[0],))
         which_combination_train = which_combination[train_ind]
@@ -964,11 +961,11 @@ def fit_model(params,
               labels, 
               evaluation_matrix,
               n_folds,
-              N_FEATURES=20,
               mlflowclient=None,
               use_mlflow=False,
               log_models=False,
-              verbose=False): 
+              verbose=False,
+              include_full_result=False): 
                             
     if use_mlflow:
         
@@ -994,7 +991,7 @@ def fit_model(params,
 
     # perform n-fold cross-validation
     result = modified_cross_validation(model, features, labels,
-                                      evaluation_matrix, n_folds=n_folds, N_FEATURES=N_FEATURES)
+                                      evaluation_matrix, n_folds=n_folds)
     
     if use_mlflow:
         for metric, value in result.items():
@@ -1011,15 +1008,17 @@ def fit_model(params,
                 mlflow.xgboost.log_model(result["model"], "model", signature=signature)
             result.pop("model")
                 
-    return {"score": np.average(result["test_jet_score"]),
-            "full_result": result}
+    if include_full_result:
+        return {"score": np.average(result["test_jet_score"]),
+                "full_result": result}
+    return {"score": np.average(result["test_jet_score"])}
 
 
 # %%
 # function to provide necessary environment variables to workers
 def initialize_mlflow(): 
     
-    os.environ['MLFLOW_TRACKING_TOKEN'] = "eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJ6eXdjRVdfd2hOSzBTMDJLS3Nxd0Q0cGNjTXJpc1BSUUJDcEo4T0o1Rm40In0.eyJleHAiOjE2ODA3MzQzMTgsImlhdCI6MTY4MDY5ODMyMiwiYXV0aF90aW1lIjoxNjgwNjk4MzE4LCJqdGkiOiI5YjZlY2YxNy0xY2Q2LTRiMDctYWM5MS0wZjZlOTc0ODcwMmEiLCJpc3MiOiJodHRwczovL2tleWNsb2FrLnNvZnR3YXJlLWRldi5uY3NhLmlsbGlub2lzLmVkdS9yZWFsbXMvbWxmbG93IiwiYXVkIjpbIm1sZmxvdy1kZW1vIiwiYWNjb3VudCJdLCJzdWIiOiIyOTdhM2ExNS02Nzc0LTQ0NDItOGVjNy0zNzBlNmVhNzM2MWIiLCJ0eXAiOiJCZWFyZXIiLCJhenAiOiJtbGZsb3ctZGVtbyIsInNlc3Npb25fc3RhdGUiOiJhN2ZkYTAxNy05MWI3LTQwYjUtOTAwMS1mNjlmZjVhM2NkY2QiLCJzY29wZSI6InByb2ZpbGUgZ3JvdXBzIGVtYWlsIiwic2lkIjoiYTdmZGEwMTctOTFiNy00MGI1LTkwMDEtZjY5ZmY1YTNjZGNkIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsIm5hbWUiOiJFbGxpb3R0IEthdWZmbWFuIiwiZ3JvdXBzIjpbIi9ncnBfamlyYV91c2VycyIsIi9zZF9tbGZsb3ciLCIvYWxsX3VzZXJzIiwiL2ppcmEtdXNlcnMiLCIvYWxsX2hwY191c2VyX3NwbyIsIm9mZmxpbmVfYWNjZXNzIiwiZGVmYXVsdC1yb2xlcy1tbGZsb3ciLCJ1bWFfYXV0aG9yaXphdGlvbiJdLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJla2F1ZmZtYSIsImdpdmVuX25hbWUiOiJFbGxpb3R0IiwiZmFtaWx5X25hbWUiOiJLYXVmZm1hbiIsImVtYWlsIjoiZWxtYWthODcwMEBnbWFpbC5jb20ifQ.CufX8VLuC5o5UfdpXks_xJJLCyY_thcjmn6aqNcAoX0J1P9azA6fNjb1raGcLkSegzM-N_e44yyK3b4i3woVeXJ-oSsT6k9OZR6Cz-7DVeajonsSaZ4pYzMNkffcQyOgcZ2pWvx-niYblqHxObZQbdPa7WPxAaeU419q-YOgLxBO9boS7BHBgXLHsoGamK1JE9mFEXudAmq13pg7JvhSzehOeyPEkqceL9IHOcyBxL80OHp4s1ygfC1qmhXF3MIfs0WdJaBLF0nm_tWPvgQ5nblzdPOP8ompvYrzI4cOJJjMxzPBp2mw5BKnuSRGSzR6IT2eUzxtyLzZLKK6iysz_Q"
+    os.environ['MLFLOW_TRACKING_TOKEN'] = "eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJ6eXdjRVdfd2hOSzBTMDJLS3Nxd0Q0cGNjTXJpc1BSUUJDcEo4T0o1Rm40In0.eyJleHAiOjE2ODE5MjgwMTgsImlhdCI6MTY4MTg5MjAyNCwiYXV0aF90aW1lIjoxNjgxODkyMDE4LCJqdGkiOiIwZGUzMTYwZi0xZjlkLTRjMTMtOGE5Mi1kMmUwMWM0MDEwOTMiLCJpc3MiOiJodHRwczovL2tleWNsb2FrLnNvZnR3YXJlLWRldi5uY3NhLmlsbGlub2lzLmVkdS9yZWFsbXMvbWxmbG93IiwiYXVkIjpbIm1sZmxvdy1kZW1vIiwiYWNjb3VudCJdLCJzdWIiOiIyOTdhM2ExNS02Nzc0LTQ0NDItOGVjNy0zNzBlNmVhNzM2MWIiLCJ0eXAiOiJCZWFyZXIiLCJhenAiOiJtbGZsb3ctZGVtbyIsInNlc3Npb25fc3RhdGUiOiI0OTI1MzY4OS1jYzlhLTQxNGUtYmZmNi03NDU5YWFlMGYwYmEiLCJzY29wZSI6InByb2ZpbGUgZ3JvdXBzIGVtYWlsIiwic2lkIjoiNDkyNTM2ODktY2M5YS00MTRlLWJmZjYtNzQ1OWFhZTBmMGJhIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsIm5hbWUiOiJFbGxpb3R0IEthdWZmbWFuIiwiZ3JvdXBzIjpbIi9ncnBfamlyYV91c2VycyIsIi9zZF9tbGZsb3ciLCIvYWxsX3VzZXJzIiwiL2ppcmEtdXNlcnMiLCIvYWxsX2hwY191c2VyX3NwbyIsIm9mZmxpbmVfYWNjZXNzIiwiZGVmYXVsdC1yb2xlcy1tbGZsb3ciLCJ1bWFfYXV0aG9yaXphdGlvbiJdLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJla2F1ZmZtYSIsImdpdmVuX25hbWUiOiJFbGxpb3R0IiwiZmFtaWx5X25hbWUiOiJLYXVmZm1hbiIsImVtYWlsIjoiZWxtYWthODcwMEBnbWFpbC5jb20ifQ.ApyII7gS2hkqGXiUgkQbt7O6IAM7p98Y3rMu65bBKFx2LXlGoArl-CvKQWgIUdFLXqH2w3GU1erHC9La9kmz-2rR7eRFTBKVOI-XXUOHAxZfBDbXU0_bHz26NU4EmAjAuvY4yHzwB0pkSp3_FywiOFljY8hJ9zr0LV7Va5SK8yBk08UyxRorfhuRw1yiUMpDn42AuNh4CrFW0nlJzWzJ8LygR_wKUmBG-uWdkBdlu4Z3Q4IPQ2l5ltP1C_nNx4dSt1HGGcceegkDz2TBEaVd-UIEjZGFSimiHoKc2rq4NeOoV6lt_Z6WqLF4P680WHysOCtJ1w92lG_b132UPzlvcg"
     os.environ['MLFLOW_TRACKING_URI'] = "https://mlflow-demo.software-dev.ncsa.illinois.edu"
     
     mlflow.set_tracking_uri('https://mlflow-demo.software-dev.ncsa.illinois.edu') 
@@ -1027,7 +1026,10 @@ def initialize_mlflow():
 
 
 # %% tags=[]
-N_FOLD=2
+features_even.shape
+
+# %% tags=[]
+USE_DASK_ML=False
 
 if USE_DASK_ML:
     start_time = time.time() 
@@ -1041,7 +1043,6 @@ if USE_DASK_ML:
                          labels=labels_even,
                          evaluation_matrix=evaluation_matrix,
                          n_folds=N_FOLD,
-                         N_FEATURES=N_FEATURES,
                          mlflowclient=mlflowclient,
                          use_mlflow=USE_MLFLOW,
                          log_models=MODEL_LOGGING) 
@@ -1057,11 +1058,10 @@ else:
         print(i)
         print(samples_even[i])
         res.append(fit_model(samples_even[i], 
-                             features=features_even,
-                             labels=labels_even, 
+                             features=features_even[:60000],
+                             labels=labels_even[:60000], 
                              evaluation_matrix=evaluation_matrix,
                              n_folds=N_FOLD,
-                             N_FEATURES=N_FEATURES,
                              mlflowclient=mlflowclient,
                              use_mlflow=USE_MLFLOW,
                              log_models=MODEL_LOGGING))
@@ -1083,12 +1083,12 @@ if MODEL_LOGGING:
     best_model_even = mlflow.xgboost.load_model(best_model_path)
     
     # register best model in mlflow model repository
-    result = mlflow.register_model(best_model_path, "sig-bkg-bdt")
+    result = mlflow.register_model(best_model_path, "reconstruction-bdt")
 
 else:
     best_model_even = res[np.argmax(scores)]["full_result"]["model"]
     
-best_model_even.save_model("models/model_230405_even.model")
+best_model_even.save_model("models/model_230419_even.model")
 
 # %% tags=[]
 if USE_DASK_ML:
@@ -1103,7 +1103,6 @@ if USE_DASK_ML:
                          labels=labels_odd,
                          evaluation_matrix=evaluation_matrix,
                          n_folds=N_FOLD,
-                         N_FEATURES=N_FEATURES,
                          mlflowclient=mlflowclient,
                          use_mlflow=USE_MLFLOW,
                          log_models=MODEL_LOGGING) 
@@ -1119,11 +1118,10 @@ else:
         print(i)
         print(samples_odd[i])
         res.append(fit_model(samples_odd[i], 
-                             features=features_odd,
-                             labels=labels_odd, 
+                             features=features_odd[:120000],
+                             labels=labels_odd[:120000], 
                              evaluation_matrix=evaluation_matrix,
                              n_folds=N_FOLD,
-                             N_FEATURES=N_FEATURES,
                              mlflowclient=mlflowclient,
                              use_mlflow=USE_MLFLOW,
                              log_models=MODEL_LOGGING))
@@ -1145,12 +1143,12 @@ if MODEL_LOGGING:
     best_model_odd = mlflow.xgboost.load_model(best_model_path)
     
     # register best model in mlflow model repository
-    result = mlflow.register_model(best_model_path, "sig-bkg-bdt")
+    # result = mlflow.register_model(best_model_path, "sig-bkg-bdt")
 
 else:
     best_model_odd = res[np.argmax(scores)]["full_result"]["model"]
     
-best_model_odd.save_model("models/model_230405_odd.model")
+best_model_odd.save_model("models/model_230419_odd.model")
 
 # %% [markdown]
 # # Evaluation with Optimized Model

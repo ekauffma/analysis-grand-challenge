@@ -10,7 +10,7 @@
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
-#     name: python3
+#     name: py3-preamble
 # ---
 
 # %% [markdown]
@@ -104,7 +104,7 @@ USE_SERVICEX = False
 SERVICEX_IGNORE_CACHE = False
 
 # analysis facility: set to "coffea_casa" for coffea-casa environments, "EAF" for FNAL, "local" for local setups
-AF = "coffea_casa"
+AF = "EAF"
 
 
 ### BENCHMARKING-SPECIFIC SETTINGS
@@ -124,8 +124,8 @@ NUM_CORES = 4
 DISABLE_PROCESSING = False
 
 # read additional branches (only with DISABLE_PROCESSING = True)
-# acceptable values are 2.7, 4, 15, 25, 50 (corresponding to % of file read), 2.7% corresponds to the standard branches used in the notebook
-IO_FILE_PERCENT = 2.7
+# acceptable values are 4, 15, 25, 50 (corresponding to % of file read), 4% corresponds to the standard branches used in the notebook
+IO_FILE_PERCENT = 4.0
 
 
 # %% [markdown]
@@ -175,39 +175,18 @@ class TtbarAnalysis(processor.ProcessorABC):
         self.io_file_percent = io_file_percent
 
     def only_do_IO(self, events):
-        # standard AGC branches cover 2.7% of the data
+        # standard AGC branches cover 4% of the data
             branches_to_read = []
-            if self.io_file_percent >= 2.7:
-                branches_to_read.extend(["Jet_pt", "Jet_eta", "Jet_phi", "Jet_btagCSVV2", "Jet_mass", "Muon_pt", "Electron_pt"])
-            
             if self.io_file_percent >= 4:
-                branches_to_read.extend(["Electron_phi", "Electron_eta","Electron_mass","Muon_phi","Muon_eta","Muon_mass",
-                                         "Photon_pt","Photon_eta","Photon_mass","Jet_jetId"])
-            
-            if self.io_file_percent>=15:
-                branches_to_read.extend(["Jet_nConstituents","Jet_electronIdx1","Jet_electronIdx2","Jet_muonIdx1","Jet_muonIdx2",
-                                         "Jet_chHEF","Jet_area","Jet_puId","Jet_qgl","Jet_btagDeepB","Jet_btagDeepCvB",
-                                         "Jet_btagDeepCvL","Jet_btagDeepFlavB","Jet_btagDeepFlavCvB","Jet_btagDeepFlavCvL",
-                                         "Jet_btagDeepFlavQG","Jet_chEmEF","Jet_chFPV0EF","Jet_muEF","Jet_muonSubtrFactor",
-                                         "Jet_neEmEF","Jet_neHEF","Jet_puIdDisc"])
-            
+                branches_to_read.extend(["Jet_pt", "Jet_eta", "Jet_phi", "Jet_btagCSVV2", "Jet_mass", "Muon_pt", "Electron_pt"])
+            if self.io_file_percent >= 15:
+                branches_to_read.extend(["Electron_phi", "Electron_eta","Electron_mass","Muon_phi","Muon_eta","Muon_mass","Jet_jetId","Jet_nConstituents","Jet_electronIdx1","Jet_electronIdx2","Jet_muonIdx1","Jet_muonIdx2","Jet_chHEF","Jet_area","Jet_puId","Jet_qgl","Jet_btagDeepB","Jet_btagDeepCvB","Jet_btagDeepCvL","Jet_btagDeepFlavB","Jet_btagDeepFlavCvB","Jet_btagDeepFlavCvL","Jet_btagDeepFlavQG","Jet_chEmEF","Jet_chFPV0EF","Jet_muEF","Jet_muonSubtrFactor", "Jet_neEmEF","Jet_neHEF","Jet_neHEF","Jet_nElectrons","Jet_nMuons","Jet_cRegRes","Jet_cRegCorr","Jet_bRegCorr","Jet_bRegRes"])
             if self.io_file_percent>=25:
-                branches_to_read.extend(["GenPart_pt","GenPart_eta","GenPart_phi","GenPart_mass","GenPart_genPartIdxMother",
-                                         "GenPart_pdgId","GenPart_status","GenPart_statusFlags"])
-            
+                branches_to_read.extend(["Jet_puIdDisc","Jet_rawFactor","Jet_hadronFlavour","Jet_partonFlavour","Jet_cleanmask","Tau_pt","Tau_eta","Tau_mass","Tau_phi","Muon_dxy","Muon_dxyErr","Muon_dxybs","Muon_dz","Muon_dzErr","Electron_dxy","Electron_dxyErr","Electron_dz","Electron_dzErr","Electron_eInvMinusPInv","Electron_energyErr","Electron_hoe","Electron_ip3d","Electron_jetPtRelv2","Electron_jetRelIso","Electron_miniPFRelIso_all","Electron_miniPFRelIso_chg","Electron_pdgId","Electron_pfRelIso03_all","Electron_pfRelIso03_chg","Electron_r9","Electron_scEtOverPt","Electron_sieie","Electron_sip3d","Electron_charge","Electron_cutBased","Electron_jetIdx","FatJet_pt","FatJet_eta","FatJet_phi","FatJet_mass","GenJet_pt","GenJet_eta","GenJet_phi","GenJet_mass"])
             if self.io_file_percent==50:
-                branches_to_read.extend(["Jet_rawFactor","Jet_bRegCorr","Jet_bRegRes","Jet_cRegCorr","Jet_cRegRes","Jet_nElectrons",
-                                         "Jet_nMuons","GenJet_pt","GenJet_eta","GenJet_phi","GenJet_mass","Tau_pt","Tau_eta","Tau_mass",
-                                         "Tau_phi","Muon_dxy","Muon_dxyErr","Muon_dxybs","Muon_dz","Muon_dzErr","Electron_dxy",
-                                         "Electron_dxyErr","Electron_dz","Electron_dzErr","Electron_eInvMinusPInv","Electron_energyErr",
-                                         "Electron_hoe","Electron_ip3d","Electron_jetPtRelv2","Electron_jetRelIso",
-                                         "Electron_miniPFRelIso_all","Electron_miniPFRelIso_chg","Electron_mvaFall17V2Iso",
-                                         "Electron_mvaFall17V2noIso","Electron_pfRelIso03_all","Electron_pfRelIso03_chg","Electron_r9",
-                                         "Electron_scEtOverPt","Electron_sieie","Electron_sip3d","Electron_mvaTTH","Electron_charge",
-                                         "Electron_cutBased","Electron_jetIdx","Electron_pdgId","Electron_photonIdx","Electron_tightCharge"])
-                
-            if self.io_file_percent not in [2.7, 4, 15, 25, 50]:
-                raise NotImplementedError("supported values for I/O percentage are 2.7, 4, 15, 25, 50")
+                branches_to_read.extend(["GenPart_pt","GenPart_eta","GenPart_phi","GenPart_mass","GenPart_genPartIdxMother","GenPart_pdgId","GenPart_status","GenPart_statusFlags","Electron_dr03HcalDepth1TowerSumEt","Electron_deltaEtaSC","Electron_dr03EcalRecHitSumEt","Electron_dr03TkSumPt","Electron_dr03TkSumPtHEEP","Electron_mvaFall17V2Iso","Electron_mvaFall17V2noIso","Electron_mvaFall17V2Iso_WP80","Electron_mvaFall17V2Iso_WP90","Electron_mvaFall17V2Iso_WPL","Electron_mvaFall17V2noIso_WP80","Electron_mvaFall17V2noIso_WP90","Electron_mvaFall17V2noIso_WPL","Electron_seedGain","Electron_genPartIdx","Electron_genPartFlav","Electron_cleanmask","Electron_lostHits","Electron_jetNDauCharged","Electron_isPFcand","Electron_cutBased_HEEP","Electron_convVeto"])
+            if self.io_file_percent not in [4, 15, 25, 50]:
+                raise NotImplementedError("supported values for I/O percentage are 4, 15, 25, 50")
             
             for branch in branches_to_read:
                 if "_" in branch:
@@ -429,10 +408,15 @@ if USE_SERVICEX:
 
 # %%
 NanoAODSchema.warn_missing_crossrefs = False # silences warnings about branches we will not use here
-if USE_DASK:
-    executor = processor.DaskExecutor(client=utils.get_client(AF))
-else:
-    executor = processor.FuturesExecutor(workers=NUM_CORES)
+
+from dask.distributed import Client
+client = Client("tcp://127.0.0.1:34665")
+executor = processor.DaskExecutor(client=client)
+
+# if USE_DASK:
+#     executor = processor.DaskExecutor(client=utils.get_client(AF))
+# else:
+#     executor = processor.FuturesExecutor(workers=NUM_CORES)
         
 run = processor.Runner(executor=executor, schema=NanoAODSchema, savemetrics=True, metadata_cache={}, chunksize=CHUNKSIZE)
 

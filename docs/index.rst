@@ -95,6 +95,14 @@ This work was supported by the U.S. National Science Foundation (NSF) cooperativ
 
    atlas-open-data-hzz/HZZ_analysis_pipeline
    
+.. toctree::
+   :maxdepth: 2
+   :titlesonly:
+   :caption: Talks and Proceedings
+   :glob:
+
+   talks.rst
+   
 
 
 Search

@@ -48,6 +48,7 @@ import time
 
 import awkward as ak
 import cabinetry
+import cloudpickle
 import correctionlib
 from coffea import processor
 from coffea.nanoevents import NanoAODSchema
@@ -64,6 +65,8 @@ from xgboost import XGBClassifier
 import pyhf
 
 import utils  # contains code for bookkeeping and cosmetics, as well as some boilerplate
+
+cloudpickle.register_pickle_by_value(utils)
 
 logging.getLogger("cabinetry").setLevel(logging.INFO)
 
@@ -123,94 +126,10 @@ config["ml"]["USE_TRITON"] = USE_TRITON
 # %% [markdown]
 # ### Machine Learning Task
 #
-# During the processing step, machine learning is used to calculate one of the variables used for this analysis. The models used are trained separately in the `jetassignment_training.ipynb` notebook. Jets in the events are assigned to labels corresponding with their parent partons using a boosted decision tree (BDT). More information about the model and training can be found within that notebook. To obtain the features used as inputs for the BDT, we use the methods defined below:
+# During the processing step, machine learning is used to calculate one of the variables used for this analysis. The models used are trained separately in the `jetassignment_training.ipynb` notebook. Jets in the events are assigned to labels corresponding with their parent partons using a boosted decision tree (BDT). More information about the model and training can be found within that notebook.
 
 # %% tags=[]
-permutations_dict = utils.get_permutations_dict(config["ml"]["MAX_N_JETS"])
-
-
-# %% tags=[]
-def get_features(jets, electrons, muons, permutations_dict):
-    '''
-    Calculate features for each of the 12 combinations per event
-
-    Args:
-        jets: selected jets
-        electrons: selected electrons
-        muons: selected muons
-        permutations_dict: which permutations to consider for each number of jets in an event
-
-    Returns:
-        features (flattened to remove event level)
-        perm_counts: how many permutations in each event. use to unflatten features
-    '''
-
-    # calculate number of jets in each event
-    njet = ak.num(jets).to_numpy()
-    # don't consider every jet for events with high jet multiplicity
-    njet[njet>max(permutations_dict.keys())] = max(permutations_dict.keys())
-    # create awkward array of permutation indices
-    perms = ak.Array([permutations_dict[n] for n in njet])
-    perm_counts = ak.num(perms)
-
-    #### calculate features ####
-    features = np.zeros((sum(perm_counts),20))
-
-    # grab lepton info
-    leptons = ak.flatten(ak.concatenate((electrons, muons),axis=1),axis=-1)
-
-    feature_count = 0
-
-    # delta R between b_toplep and lepton
-    features[:,0] = ak.flatten(np.sqrt((leptons.eta - jets[perms[...,3]].eta)**2 +
-                                       (leptons.phi - jets[perms[...,3]].phi)**2)).to_numpy()
-
-
-    #delta R between the two W
-    features[:,1] = ak.flatten(np.sqrt((jets[perms[...,0]].eta - jets[perms[...,1]].eta)**2 +
-                                       (jets[perms[...,0]].phi - jets[perms[...,1]].phi)**2)).to_numpy()
-
-    #delta R between W and b_tophad
-    features[:,2] = ak.flatten(np.sqrt((jets[perms[...,0]].eta - jets[perms[...,2]].eta)**2 +
-                                       (jets[perms[...,0]].phi - jets[perms[...,2]].phi)**2)).to_numpy()
-    features[:,3] = ak.flatten(np.sqrt((jets[perms[...,1]].eta - jets[perms[...,2]].eta)**2 +
-                                       (jets[perms[...,1]].phi - jets[perms[...,2]].phi)**2)).to_numpy()
-
-    # combined mass of b_toplep and lepton
-    features[:,4] = ak.flatten((leptons + jets[perms[...,3]]).mass).to_numpy()
-
-    # combined mass of W
-    features[:,5] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]]).mass).to_numpy()
-
-    # combined mass of W and b_tophad
-    features[:,6] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] +
-                                 jets[perms[...,2]]).mass).to_numpy()
-
-    feature_count+=1
-    # combined pT of W and b_tophad
-    features[:,7] = ak.flatten((jets[perms[...,0]] + jets[perms[...,1]] +
-                                 jets[perms[...,2]]).pt).to_numpy()
-
-
-    # pt of every jet
-    features[:,8] = ak.flatten(jets[perms[...,0]].pt).to_numpy()
-    features[:,9] = ak.flatten(jets[perms[...,1]].pt).to_numpy()
-    features[:,10] = ak.flatten(jets[perms[...,2]].pt).to_numpy()
-    features[:,11] = ak.flatten(jets[perms[...,3]].pt).to_numpy()
-
-    # btagCSVV2 of every jet
-    features[:,12] = ak.flatten(jets[perms[...,0]].btagCSVV2).to_numpy()
-    features[:,13] = ak.flatten(jets[perms[...,1]].btagCSVV2).to_numpy()
-    features[:,14] = ak.flatten(jets[perms[...,2]].btagCSVV2).to_numpy()
-    features[:,15] = ak.flatten(jets[perms[...,3]].btagCSVV2).to_numpy()
-
-    # quark-gluon likelihood discriminator of every jet
-    features[:,16] = ak.flatten(jets[perms[...,0]].qgl).to_numpy()
-    features[:,17] = ak.flatten(jets[perms[...,1]].qgl).to_numpy()
-    features[:,18] = ak.flatten(jets[perms[...,2]].qgl).to_numpy()
-    features[:,19] = ak.flatten(jets[perms[...,3]].qgl).to_numpy()
-
-    return features, perm_counts
+permutations_dict = utils.mltools.get_permutations_dict(config["ml"]["MAX_N_JETS"])
 
 
 # %% [markdown]
@@ -223,14 +142,6 @@ def get_features(jets, electrons, muons, permutations_dict):
 # - filling all the information into histograms that get aggregated and ultimately returned to us by `coffea`.
 
 # %% tags=[]
-# functions creating systematic variations
-def jet_pt_resolution(pt):
-    # normal distribution with 5% variations, shape matches jets
-    counts = ak.num(pt)
-    pt_flat = ak.flatten(pt)
-    resolution_variation = np.random.normal(np.ones_like(pt_flat), 0.05)
-    return ak.unflatten(resolution_variation, counts)
-
 class TtbarAnalysis(processor.ProcessorABC):
     def __init__(self,
                  use_dask,
@@ -345,7 +256,7 @@ class TtbarAnalysis(processor.ProcessorABC):
         # cannot attach pT variations to events.jet, so attach to events directly
         # and subsequently scale pT by these scale factors
         events["pt_scale_up"] = 1.03
-        events["pt_res_up"] = jet_pt_resolution(events.Jet.pt)
+        events["pt_res_up"] = utils.systematics.jet_pt_resolution(events.Jet.pt)
 
         syst_variations = ["nominal"]
         jet_kinematic_systs = ["pt_scale_up", "pt_res_up"]
@@ -423,7 +334,7 @@ class TtbarAnalysis(processor.ProcessorABC):
                     if sum(region_selection)==0: continue
 
                     if self.use_inference:
-                        features, perm_counts = get_features(region_jets, region_elecs, region_muons, self.permutations_dict)
+                        features, perm_counts = utils.mltools.get_features(region_jets, region_elecs, region_muons, self.permutations_dict)
                         even_perm = np.repeat(region_even, perm_counts)
 
                         #calculate ml observable
@@ -518,7 +429,9 @@ class TtbarAnalysis(processor.ProcessorABC):
 # Here, we gather all the required information about the files we want to process: paths to the files and asociated metadata.
 
 # %% tags=[]
-fileset = utils.construct_fileset(N_FILES_MAX_PER_SAMPLE, use_xcache=False, af_name=config["benchmarking"]["AF_NAME"])  # local files on /data for ssl-dev
+fileset = utils.datadelivery.construct_fileset(N_FILES_MAX_PER_SAMPLE, 
+                                               use_xcache=False, 
+                                               af_name=config["benchmarking"]["AF_NAME"])  # local files on /data for ssl-dev
 
 print(f"processes in fileset: {list(fileset.keys())}")
 print(f"\nexample of information in fileset:\n{{\n  'files': [{fileset['ttbar__nominal']['files'][0]}, ...],")
@@ -628,7 +541,9 @@ if USE_SERVICEX:
 
     # now we query the files using a wrapper around ServiceXDataset to transform all processes at once
     t0 = time.time()
-    ds = utils.ServiceXDatasetGroup(fileset, backend_name="uproot", ignore_cache=config["global"]["SERVICEX_IGNORE_CACHE"])
+    ds = utils.datadelivery.ServiceXDatasetGroup(fileset, 
+                                                 backend_name="uproot", 
+                                                 ignore_cache=config["global"]["SERVICEX_IGNORE_CACHE"])
     files_per_process = ds.get_data_rootfiles_uri(query, as_signed_url=True, title="CMS ttbar")
 
     print(f"ServiceX data delivery took {time.time() - t0:.2f} seconds")
@@ -647,11 +562,15 @@ if USE_SERVICEX:
 # %% tags=[]
 NanoAODSchema.warn_missing_crossrefs = False # silences warnings about branches we will not use here
 if USE_DASK:
-    executor = processor.DaskExecutor(client=utils.get_client(af=config["global"]["AF"]))
+    executor = processor.DaskExecutor(client=utils.datadelivery.get_client(af=config["global"]["AF"]))
 else:
     executor = processor.FuturesExecutor(workers=config["benchmarking"]["NUM_CORES"])
 
-run = processor.Runner(executor=executor, schema=NanoAODSchema, savemetrics=True, metadata_cache={}, chunksize=config["benchmarking"]["CHUNKSIZE"])
+run = processor.Runner(executor=executor, 
+                       schema=NanoAODSchema, 
+                       savemetrics=True, 
+                       metadata_cache={}, 
+                       chunksize=config["benchmarking"]["CHUNKSIZE"])
 
 if USE_SERVICEX:
     treename = "servicex"
@@ -728,7 +647,7 @@ print(f"amount of data read: {metrics['bytesread']/1000**2:.2f} MB")  # likely b
 # We built histograms in two phase space regions, for multiple physics processes and systematic variations.
 
 # %% tags=[]
-utils.set_style()
+utils.plotting.set_style()
 
 all_histograms["hist"][120j::hist.rebin(2), "4j1b", :, "nominal"].stack("process")[::-1].plot(stack=True, histtype="fill", linewidth=1, edgecolor="grey")
 plt.legend(frameon=False)
@@ -797,9 +716,9 @@ if USE_INFERENCE:
 # This also builds pseudo-data by combining events from the various simulation setups we have processed.
 
 # %% tags=[]
-utils.save_histograms(all_histograms['hist'], fileset, "histograms.root")
+utils.systematics.save_histograms(all_histograms['hist'], fileset, "histograms.root")
 if USE_INFERENCE:
-    utils.save_ml_histograms(all_histograms['ml_hist_dict'], fileset, "histograms_ml.root", config)
+    utils.systematics.save_ml_histograms(all_histograms['ml_hist_dict'], fileset, "histograms_ml.root", config)
 
 # %% [markdown]
 # ### Statistical inference
@@ -900,7 +819,7 @@ if USE_INFERENCE:
 
 # %% tags=[]
 if USE_INFERENCE:
-    figs = utils.plot_data_mc(model_prediction, model_prediction_postfit, data_ml, config_ml)
+    figs = utils.plotting.plot_data_mc(model_prediction, model_prediction_postfit, data_ml, config_ml)
 
 # %% [markdown]
 # ### What is next?

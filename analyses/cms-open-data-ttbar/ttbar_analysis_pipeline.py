@@ -96,7 +96,7 @@ logging.getLogger("cabinetry").setLevel(logging.INFO)
 # %% tags=[]
 ### GLOBAL CONFIGURATION
 # input files per process, set to e.g. 10 (smaller number = faster)
-N_FILES_MAX_PER_SAMPLE = 5
+N_FILES_MAX_PER_SAMPLE = 1
 
 # enable Dask
 USE_DASK = True
@@ -157,13 +157,14 @@ class TtbarAnalysis(processor.ProcessorABC):
         bin_high = 550
         name = "observable"
         label = "observable [GeV]"
-        self.hist = (
-            hist.Hist.new.Reg(num_bins, bin_low, bin_high, name=name, label=label)
-            .StrCat(["4j1b", "4j2b"], name="region", label="Region")
-            .StrCat([], name="process", label="Process", growth=True)
-            .StrCat([], name="variation", label="Systematic variation", growth=True)
-            .Weight()
-        )
+        self.hist_dict = {}
+        for region in ["4j1b", "4j2b"]:
+            self.hist_dict[region] = (
+                hist.Hist.new.Reg(num_bins, bin_low, bin_high, name=name, label=label)
+                .StrCat([], name="process", label="Process", growth=True)
+                .StrCat([], name="variation", label="Systematic variation", growth=True)
+                .Weight()
+            )
 
         self.use_dask = use_dask
         self.disable_processing = disable_processing
@@ -176,7 +177,7 @@ class TtbarAnalysis(processor.ProcessorABC):
             self.feature_names = ml_options["FEATURE_NAMES"]
             feature_descriptions = ml_options["FEATURE_DESCRIPTIONS"]
             for i in range(len(self.feature_names)):
-                self.ml_hist_dict[f"hist_{self.feature_names[i]}"] = (
+                self.ml_hist_dict[self.feature_names[i]] = (
                     hist.Hist.new.Reg(num_bins,
                                       ml_options["BIN_RANGES"][i][0],
                                       ml_options["BIN_RANGES"][i][1],
@@ -213,11 +214,14 @@ class TtbarAnalysis(processor.ProcessorABC):
             # IO testing with no subsequent processing
             return self.only_do_IO(events)
 
-        histogram = self.hist.copy()
+        # create copies of histogram objects
+        hist_dict = {}
+        for region in ["4j1b", "4j2b"]:
+            hist_dict[region] = self.hist_dict[region].copy()
         if self.use_inference:
             ml_hist_dict = {}
             for i in range(len(self.feature_names)):
-                ml_hist_dict[f"hist_{self.feature_names[i]}"] = self.ml_hist_dict[f"hist_{self.feature_names[i]}"].copy()
+                ml_hist_dict[self.feature_names[i]] = self.ml_hist_dict[self.feature_names[i]].copy()
 
         process = events.metadata["process"]  # "ttbar" etc.
         variation = events.metadata["variation"]  # "nominal" etc.
@@ -387,34 +391,34 @@ class TtbarAnalysis(processor.ProcessorABC):
                             # The pt array is only used to make sure the output array has the correct shape
                             wgt_variation = self.cset["event_systematics"].evaluate("scale_var", direction, region_jets.pt[:,0])
                         syst_var_name = f"{syst_var}_{direction}"
-                        histogram.fill(
-                            observable=observable, region=region, process=process,
+                        hist_dict[region].fill(
+                            observable=observable, process=process,
                             variation=syst_var_name, weight=region_weights * wgt_variation
                         )
                         if region=="4j2b" and self.use_inference:
                             for i in range(len(self.feature_names)):
-                                ml_hist_dict[f"hist_{self.feature_names[i]}"].fill(observable=features[...,i],
-                                                                                   process=process,
-                                                                                   variation=syst_var_name,
-                                                                                   weight=region_weights * wgt_variation)
+                                ml_hist_dict[self.feature_names[i]].fill(observable=features[...,i],
+                                                                         process=process,
+                                                                         variation=syst_var_name,
+                                                                         weight=region_weights * wgt_variation)
                 else:
                     # Should either be 'nominal' or an object variation systematic
                     if variation != "nominal":
                         # This is a 2-point systematic, e.g. ttbar__scaledown, ttbar__ME_var, etc.
                         syst_var_name = variation
-                    histogram.fill(
-                        observable=observable, region=region, process=process,
+                    hist_dict[region].fill(
+                        observable=observable, process=process,
                         variation=syst_var_name, weight=region_weights
                     )
                     if region=="4j2b" and self.use_inference:
                         for i in range(len(self.feature_names)):
-                            ml_hist_dict[f"hist_{self.feature_names[i]}"].fill(observable=features[...,i],
-                                                                               process=process,
-                                                                               variation=syst_var_name,
-                                                                               weight=region_weights)
+                            ml_hist_dict[self.feature_names[i]].fill(observable=features[...,i],
+                                                                     process=process,
+                                                                     variation=syst_var_name,
+                                                                     weight=region_weights)
 
 
-        output = {"nevents": {events.metadata["dataset"]: len(events)}, "hist": histogram}
+        output = {"nevents": {events.metadata["dataset"]: len(events)}, "hist_dict": hist_dict}
         if self.use_inference:
             output["ml_hist_dict"] = ml_hist_dict
 
@@ -649,13 +653,19 @@ print(f"amount of data read: {metrics['bytesread']/1000**2:.2f} MB")  # likely b
 # %% tags=[]
 utils.plotting.set_style()
 
-all_histograms["hist"][120j::hist.rebin(2), "4j1b", :, "nominal"].stack("process")[::-1].plot(stack=True, histtype="fill", linewidth=1, edgecolor="grey")
+all_histograms["hist_dict"]["4j1b"][120j::hist.rebin(2), :, "nominal"].stack("process")[::-1].plot(stack=True, 
+                                                                                                   histtype="fill", 
+                                                                                                   linewidth=1, 
+                                                                                                   edgecolor="grey")
 plt.legend(frameon=False)
 plt.title("$\geq$ 4 jets, 1 b-tag")
 plt.xlabel("$H_T$ [GeV]");
 
 # %% tags=[]
-all_histograms["hist"][:, "4j2b", :, "nominal"].stack("process")[::-1].plot(stack=True, histtype="fill", linewidth=1,edgecolor="grey")
+all_histograms["hist_dict"]["4j2b"][120j::hist.rebin(2), :, "nominal"].stack("process")[::-1].plot(stack=True, 
+                                                                                                   histtype="fill", 
+                                                                                                   linewidth=1, 
+                                                                                                   edgecolor="grey")
 plt.legend(frameon=False)
 plt.title("$\geq$ 4 jets, $\geq$ 2 b-tags")
 plt.xlabel("$m_{bjj}$ [GeV]");
@@ -671,20 +681,20 @@ plt.xlabel("$m_{bjj}$ [GeV]");
 
 # %% tags=[]
 # b-tagging variations
-all_histograms["hist"][120j::hist.rebin(2), "4j1b", "ttbar", "nominal"].plot(label="nominal", linewidth=2)
-all_histograms["hist"][120j::hist.rebin(2), "4j1b", "ttbar", "btag_var_0_up"].plot(label="NP 1", linewidth=2)
-all_histograms["hist"][120j::hist.rebin(2), "4j1b", "ttbar", "btag_var_1_up"].plot(label="NP 2", linewidth=2)
-all_histograms["hist"][120j::hist.rebin(2), "4j1b", "ttbar", "btag_var_2_up"].plot(label="NP 3", linewidth=2)
-all_histograms["hist"][120j::hist.rebin(2), "4j1b", "ttbar", "btag_var_3_up"].plot(label="NP 4", linewidth=2)
+all_histograms["hist_dict"]["4j1b"][120j::hist.rebin(2), "ttbar", "nominal"].plot(label="nominal", linewidth=2)
+all_histograms["hist_dict"]["4j1b"][120j::hist.rebin(2), "ttbar", "btag_var_0_up"].plot(label="NP 1", linewidth=2)
+all_histograms["hist_dict"]["4j1b"][120j::hist.rebin(2), "ttbar", "btag_var_1_up"].plot(label="NP 2", linewidth=2)
+all_histograms["hist_dict"]["4j1b"][120j::hist.rebin(2), "ttbar", "btag_var_2_up"].plot(label="NP 3", linewidth=2)
+all_histograms["hist_dict"]["4j1b"][120j::hist.rebin(2), "ttbar", "btag_var_3_up"].plot(label="NP 4", linewidth=2)
 plt.legend(frameon=False)
 plt.xlabel("$H_T$ [GeV]")
 plt.title("b-tagging variations");
 
 # %% tags=[]
 # jet energy scale variations
-all_histograms["hist"][:, "4j2b", "ttbar", "nominal"].plot(label="nominal", linewidth=2)
-all_histograms["hist"][:, "4j2b", "ttbar", "pt_scale_up"].plot(label="scale up", linewidth=2)
-all_histograms["hist"][:, "4j2b", "ttbar", "pt_res_up"].plot(label="resolution up", linewidth=2)
+all_histograms["hist_dict"]["4j2b"][:, "ttbar", "nominal"].plot(label="nominal", linewidth=2)
+all_histograms["hist_dict"]["4j2b"][:, "ttbar", "pt_scale_up"].plot(label="scale up", linewidth=2)
+all_histograms["hist_dict"]["4j2b"][:, "ttbar", "pt_res_up"].plot(label="resolution up", linewidth=2)
 plt.legend(frameon=False)
 plt.xlabel("$m_{bjj}$ [Gev]")
 plt.title("Jet energy variations");
@@ -700,7 +710,7 @@ if USE_INFERENCE:
         else: 
             column=1
             row=i-10
-        all_histograms['ml_hist_dict'][f'hist_{config["ml"]["FEATURE_NAMES"][i]}'][:, :, "nominal"].stack("process").project("observable").plot(
+        all_histograms['ml_hist_dict'][config["ml"]["FEATURE_NAMES"][i]][:, :, "nominal"].stack("process").project("observable").plot(
             stack=True, 
             histtype="fill", 
             linewidth=1, 
@@ -716,9 +726,9 @@ if USE_INFERENCE:
 # This also builds pseudo-data by combining events from the various simulation setups we have processed.
 
 # %% tags=[]
-utils.systematics.save_histograms(all_histograms['hist'], fileset, "histograms.root")
+utils.systematics.save_histograms(all_histograms['hist_dict'], fileset, "histograms.root", ["4j1b", "4j2b"])
 if USE_INFERENCE:
-    utils.systematics.save_ml_histograms(all_histograms['ml_hist_dict'], fileset, "histograms_ml.root", config)
+    utils.systematics.save_histograms(all_histograms['ml_hist_dict'], fileset, "histograms_ml.root", config["ml"]["FEATURE_NAMES"])
 
 # %% [markdown]
 # ### Statistical inference
@@ -741,6 +751,12 @@ cabinetry.workspace.save(ws, "workspace.json")
 
 # %% [markdown]
 # Let's try out what we built: the next cell will perform a maximum likelihood fit of our statistical model to the pseudodata we built.
+
+# %% tags=[]
+model, data = cabinetry.model_utils.model_and_data(ws)
+
+# %% tags=[]
+fit_results = cabinetry.fit.fit(model, data)
 
 # %% tags=[]
 model, data = cabinetry.model_utils.model_and_data(ws)

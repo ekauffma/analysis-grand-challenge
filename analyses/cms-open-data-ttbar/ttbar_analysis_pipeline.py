@@ -66,7 +66,7 @@ import pyhf
 
 import utils  # contains code for bookkeeping and cosmetics, as well as some boilerplate
 
-cloudpickle.register_pickle_by_value(utils)
+cloudpickle.register_pickle_by_value(utils) # serialize methods and objects in utils so that they can be accessed within the coffea processor
 
 logging.getLogger("cabinetry").setLevel(logging.INFO)
 
@@ -96,17 +96,13 @@ logging.getLogger("cabinetry").setLevel(logging.INFO)
 # %% tags=[]
 ### GLOBAL CONFIGURATION
 # input files per process, set to e.g. 10 (smaller number = faster)
-N_FILES_MAX_PER_SAMPLE = 1
+N_FILES_MAX_PER_SAMPLE = 5
 
 # enable Dask
 USE_DASK = True
 
 # enable ServiceX
 USE_SERVICEX = False
-
-### LOAD OTHER CONFIGURATION VARIABLES
-with open("config.yaml") as config_file:
-    config = yaml.safe_load(config_file)
 
 ### ML-INFERENCE SETTINGS
 
@@ -115,21 +111,6 @@ USE_INFERENCE = True
 
 # enable inference using NVIDIA Triton server
 USE_TRITON = False
-
-### LOAD OTHER CONFIGURATION VARIABLES
-with open("config.yaml") as config_file:
-    config = yaml.safe_load(config_file)
-
-config["ml"]["USE_INFERENCE"] = USE_INFERENCE
-config["ml"]["USE_TRITON"] = USE_TRITON
-
-# %% [markdown]
-# ### Machine Learning Task
-#
-# During the processing step, machine learning is used to calculate one of the variables used for this analysis. The models used are trained separately in the `jetassignment_training.ipynb` notebook. Jets in the events are assigned to labels corresponding with their parent partons using a boosted decision tree (BDT). More information about the model and training can be found within that notebook.
-
-# %% tags=[]
-permutations_dict = utils.mltools.get_permutations_dict(config["ml"]["MAX_N_JETS"])
 
 
 # %% [markdown]
@@ -140,66 +121,48 @@ permutations_dict = utils.mltools.get_permutations_dict(config["ml"]["MAX_N_JETS
 # - event weighting,
 # - calculating systematic uncertainties at the event and object level,
 # - filling all the information into histograms that get aggregated and ultimately returned to us by `coffea`.
+#
+# #### Machine Learning Task
+#
+# During the processing step, machine learning is used to calculate one of the variables used for this analysis. The models used are trained separately in the `jetassignment_training.ipynb` notebook. Jets in the events are assigned to labels corresponding with their parent partons using a boosted decision tree (BDT). More information about the model and training can be found within that notebook.
 
 # %% tags=[]
 class TtbarAnalysis(processor.ProcessorABC):
     def __init__(self,
                  use_dask,
-                 disable_processing,
-                 io_branches,
-                 ml_options,
-                 xgboost_model_even,
-                 xgboost_model_odd,
-                 permutations_dict={}):
+                 use_inference,
+                 use_triton):
 
         num_bins = 25
         bin_low = 50
         bin_high = 550
         name = "observable"
         label = "observable [GeV]"
-        self.hist_dict = {}
-        for region in ["4j1b", "4j2b"]:
-            self.hist_dict[region] = (
-                hist.Hist.new.Reg(num_bins, bin_low, bin_high, name=name, label=label)
-                .StrCat([], name="process", label="Process", growth=True)
-                .StrCat([], name="variation", label="Systematic variation", growth=True)
-                .Weight()
-            )
+        self.hist_dict = utils.datadelivery.create_hist_dict(
+            ["4j1b","4j2b"],
+            [num_bins, num_bins],
+            [(bin_low, bin_high),(bin_low, bin_high)],
+            [name, name],
+            [label, label]
+        )
 
         self.use_dask = use_dask
-        self.disable_processing = disable_processing
-        self.io_branches = io_branches
         self.cset = correctionlib.CorrectionSet.from_file("corrections.json")
 
-        self.use_inference = ml_options["USE_INFERENCE"]
+        self.use_inference = use_inference
         if self.use_inference:
-            self.ml_hist_dict = {}
-            self.feature_names = ml_options["FEATURE_NAMES"]
-            feature_descriptions = ml_options["FEATURE_DESCRIPTIONS"]
-            for i in range(len(self.feature_names)):
-                self.ml_hist_dict[self.feature_names[i]] = (
-                    hist.Hist.new.Reg(num_bins,
-                                      ml_options["BIN_RANGES"][i][0],
-                                      ml_options["BIN_RANGES"][i][1],
-                                      name="observable",
-                                      label=feature_descriptions[i])
-                    .StrCat([], name="process", label="Process", growth=True)
-                    .StrCat([], name="variation", label="Systematic variation", growth=True)
-                    .Weight()
-                )
-
-            # for ML inference
-            self.use_triton = ml_options["USE_TRITON"]
-            self.xgboost_model_even = xgboost_model_even
-            self.xgboost_model_odd = xgboost_model_odd
-            self.model_name = ml_options["MODEL_NAME"]
-            self.model_vers_even = ml_options["MODEL_VERSION_EVEN"]
-            self.model_vers_odd = ml_options["MODEL_VERSION_ODD"]
-            self.url = ml_options["TRITON_URL"]
-            self.permutations_dict = permutations_dict
+            n_features = len(utils.config["ml"]["FEATURE_NAMES"])
+            self.ml_hist_dict = utils.datadelivery.create_hist_dict(
+                utils.config["ml"]["FEATURE_NAMES"],
+                [num_bins]*n_features,
+                utils.config["ml"]["BIN_RANGES"],
+                [name]*n_features,
+                utils.config["ml"]["FEATURE_DESCRIPTIONS"]
+            )
+            self.use_triton = use_triton
 
     def only_do_IO(self, events):
-        for branch in self.io_branches:
+        for branch in utils.config["benchmarking"]["IO_BRANCHES"][utils.config["benchmarking"]["IO_FILE_PERCENT"]]:
             if "_" in branch:
                 split = branch.split("_")
                 object_type = split[0]
@@ -210,7 +173,7 @@ class TtbarAnalysis(processor.ProcessorABC):
         return {"hist": {}}
 
     def process(self, events):
-        if self.disable_processing:
+        if utils.config["benchmarking"]["DISABLE_PROCESSING"]:
             # IO testing with no subsequent processing
             return self.only_do_IO(events)
 
@@ -220,8 +183,10 @@ class TtbarAnalysis(processor.ProcessorABC):
             hist_dict[region] = self.hist_dict[region].copy()
         if self.use_inference:
             ml_hist_dict = {}
-            for i in range(len(self.feature_names)):
-                ml_hist_dict[self.feature_names[i]] = self.ml_hist_dict[self.feature_names[i]].copy()
+            for i in range(len(utils.config["ml"]["FEATURE_NAMES"])):
+                ml_hist_dict[utils.config["ml"]["FEATURE_NAMES"][i]] = self.ml_hist_dict[
+                    utils.config["ml"]["FEATURE_NAMES"][i]
+                ].copy()
 
         process = events.metadata["process"]  # "ttbar" etc.
         variation = events.metadata["variation"]  # "nominal" etc.
@@ -240,19 +205,11 @@ class TtbarAnalysis(processor.ProcessorABC):
             if self.use_triton:
                 import tritonclient.grpc as grpcclient
                 triton_client = grpcclient.InferenceServerClient(url=self.url)
-                model_metadata = triton_client.get_model_metadata(self.model_name, self.model_vers_even)
+                model_metadata = triton_client.get_model_metadata(utils.config["ml"]["MODEL_NAME"], 
+                                                                  utils.config["ml"]["MODEL_VERSION_EVEN"])
                 input_name = model_metadata.inputs[0].name
                 dtype = model_metadata.inputs[0].datatype
                 output_name = model_metadata.outputs[0].name
-
-            elif not self.use_dask:
-                model_even = XGBClassifier()
-                model_even.load_model(self.xgboost_model_even)
-                self.xgboost_model_even = model_even
-
-                model_odd = XGBClassifier()
-                model_odd.load_model(self.xgboost_model_odd)
-                self.xgboost_model_odd = model_odd
 
         #### systematics
         # jet energy scale / resolution systematics
@@ -318,8 +275,6 @@ class TtbarAnalysis(processor.ProcessorABC):
                 region_elecs = elecs[region_selection]
                 region_muons = muons[region_selection]
                 region_weights = np.ones(len(region_jets)) * xsec_weight
-                if self.use_inference:
-                    region_even = even[region_selection]
 
                 if region == "4j1b":
                     observable = ak.sum(region_jets.pt, axis=-1)
@@ -338,42 +293,26 @@ class TtbarAnalysis(processor.ProcessorABC):
                     if sum(region_selection)==0: continue
 
                     if self.use_inference:
-                        features, perm_counts = utils.mltools.get_features(region_jets, region_elecs, region_muons, self.permutations_dict)
+                        region_even = even[region_selection]
+                        
+                        features, perm_counts = utils.mltools.get_features(region_jets, region_elecs, region_muons, 
+                                                                           max_n_jets=utils.config["ml"]["MAX_N_JETS"])
                         even_perm = np.repeat(region_even, perm_counts)
 
                         #calculate ml observable
                         if self.use_triton:
-
-                            results = np.zeros(features.shape[0])
-                            output = grpcclient.InferRequestedOutput(output_name)
-
-                            if len(features[even_perm])>0:
-                                inpt = [grpcclient.InferInput(input_name, features[even_perm].shape, dtype)]
-                                inpt[0].set_data_from_numpy(features[even_perm].astype(np.float32))
-                                results[even_perm]=triton_client.infer(
-                                    model_name=self.model_name,
-                                    model_version=self.model_vers_even,
-                                    inputs=inpt,
-                                    outputs=[output]
-                                ).as_numpy(output_name)[:, 1]
-                            if len(features[np.invert(even_perm)])>0:
-                                inpt = [grpcclient.InferInput(input_name, features[np.invert(even_perm)].shape, dtype)]
-                                inpt[0].set_data_from_numpy(features[np.invert(even_perm)].astype(np.float32))
-                                results[np.invert(even_perm)]=triton_client.infer(
-                                    model_name=self.model_name,
-                                    model_version=self.model_vers_odd,
-                                    inputs=inpt,
-                                    outputs=[output]
-                                ).as_numpy(output_name)[:, 1]
+                            results = utils.mltools.get_inference_results_triton(features, 
+                                                                                 even_perm, 
+                                                                                 triton_client, 
+                                                                                 utils.config["ml"]["MODEL_NAME"], 
+                                                                                 utils.config["ml"]["MODEL_VERSION_EVEN"], 
+                                                                                 utils.config["ml"]["MODEL_VERSION_ODD"])
 
                         else:
-                            results = np.zeros(features.shape[0])
-                            if len(features[even_perm])>0:
-                                results[even_perm] = self.xgboost_model_odd.predict_proba(
-                                    features[even_perm,:])[:, 1]
-                            if len(features[np.invert(even_perm)])>0:
-                                results[np.invert(even_perm)] = results_odd = self.xgboost_model_even.predict_proba(
-                                    features[np.invert(even_perm),:])[:, 1]
+                            results = utils.mltools.get_inference_results_local(features, 
+                                                                                even_perm, 
+                                                                                utils.mltools.model_even, 
+                                                                                utils.mltools.model_odd)
 
                         results = ak.unflatten(results, perm_counts)
                         features = ak.flatten(ak.unflatten(features, perm_counts)[
@@ -396,11 +335,13 @@ class TtbarAnalysis(processor.ProcessorABC):
                             variation=syst_var_name, weight=region_weights * wgt_variation
                         )
                         if region=="4j2b" and self.use_inference:
-                            for i in range(len(self.feature_names)):
-                                ml_hist_dict[self.feature_names[i]].fill(observable=features[...,i],
-                                                                         process=process,
-                                                                         variation=syst_var_name,
-                                                                         weight=region_weights * wgt_variation)
+                            for i in range(len(utils.config["ml"]["FEATURE_NAMES"])):
+                                ml_hist_dict[utils.config["ml"]["FEATURE_NAMES"][i]].fill(
+                                    observable=features[...,i],
+                                    process=process,
+                                    variation=syst_var_name,
+                                    weight=region_weights * wgt_variation
+                                )
                 else:
                     # Should either be 'nominal' or an object variation systematic
                     if variation != "nominal":
@@ -411,11 +352,13 @@ class TtbarAnalysis(processor.ProcessorABC):
                         variation=syst_var_name, weight=region_weights
                     )
                     if region=="4j2b" and self.use_inference:
-                        for i in range(len(self.feature_names)):
-                            ml_hist_dict[self.feature_names[i]].fill(observable=features[...,i],
-                                                                     process=process,
-                                                                     variation=syst_var_name,
-                                                                     weight=region_weights)
+                        for i in range(len(utils.config["ml"]["FEATURE_NAMES"])):
+                            ml_hist_dict[utils.config["ml"]["FEATURE_NAMES"][i]].fill(
+                                observable=features[...,i],
+                                process=process,
+                                variation=syst_var_name,
+                                weight=region_weights
+                            )
 
 
         output = {"nevents": {events.metadata["dataset"]: len(events)}, "hist_dict": hist_dict}
@@ -435,7 +378,7 @@ class TtbarAnalysis(processor.ProcessorABC):
 # %% tags=[]
 fileset = utils.datadelivery.construct_fileset(N_FILES_MAX_PER_SAMPLE, 
                                                use_xcache=False, 
-                                               af_name=config["benchmarking"]["AF_NAME"])  # local files on /data for ssl-dev
+                                               af_name=utils.config["benchmarking"]["AF_NAME"])  # local files on /data for ssl-dev
 
 print(f"processes in fileset: {list(fileset.keys())}")
 print(f"\nexample of information in fileset:\n{{\n  'files': [{fileset['ttbar__nominal']['files'][0]}, ...],")
@@ -566,15 +509,15 @@ if USE_SERVICEX:
 # %% tags=[]
 NanoAODSchema.warn_missing_crossrefs = False # silences warnings about branches we will not use here
 if USE_DASK:
-    executor = processor.DaskExecutor(client=utils.datadelivery.get_client(af=config["global"]["AF"]))
+    executor = processor.DaskExecutor(client=utils.datadelivery.get_client(af=utils.config["global"]["AF"]))
 else:
-    executor = processor.FuturesExecutor(workers=config["benchmarking"]["NUM_CORES"])
+    executor = processor.FuturesExecutor(workers=utils.config["benchmarking"]["NUM_CORES"])
 
 run = processor.Runner(executor=executor, 
                        schema=NanoAODSchema, 
                        savemetrics=True, 
                        metadata_cache={}, 
-                       chunksize=config["benchmarking"]["CHUNKSIZE"])
+                       chunksize=utils.config["benchmarking"]["CHUNKSIZE"])
 
 if USE_SERVICEX:
     treename = "servicex"
@@ -582,32 +525,14 @@ if USE_SERVICEX:
 else:
     treename = "Events"
 
-if not USE_DASK and not USE_TRITON and USE_INFERENCE:
-    model_even = config["ml"]["XGBOOST_MODEL_PATH_EVEN"]
-    model_odd = config["ml"]["XGBOOST_MODEL_PATH_ODD"]
-
-elif not USE_TRITON and USE_INFERENCE:
-    model_even = XGBClassifier()
-    model_even.load_model(config["ml"]["XGBOOST_MODEL_PATH_EVEN"])
-    model_odd = XGBClassifier()
-    model_odd.load_model(config["ml"]["XGBOOST_MODEL_PATH_ODD"])
-
-else:
-    model_even = None
-    model_odd = None
-
 filemeta = run.preprocess(fileset, treename=treename)  # pre-processing
 
 t0 = time.monotonic()
-all_histograms, metrics = run(fileset, treename, processor_instance=TtbarAnalysis(USE_DASK,
-                                                                                  config["benchmarking"]["DISABLE_PROCESSING"],
-                                                                                  config["benchmarking"]["IO_BRANCHES"][
-                                                                                      config["benchmarking"]["IO_FILE_PERCENT"]
-                                                                                  ],
-                                                                                  config["ml"],
-                                                                                  model_even,
-                                                                                  model_odd,
-                                                                                  permutations_dict))  # processing
+all_histograms, metrics = run(fileset, 
+                              treename, 
+                              processor_instance=TtbarAnalysis(USE_DASK,
+                                                               USE_INFERENCE,
+                                                               USE_TRITON))  # processing
 exec_time = time.monotonic() - t0
 
 print(f"\nexecution took {exec_time:.2f} seconds")
@@ -617,17 +542,17 @@ print(f"\nexecution took {exec_time:.2f} seconds")
 dataset_source = "/data" if fileset["ttbar__nominal"]["files"][0].startswith("/data") else "https://xrootd-local.unl.edu:1094" # TODO: xcache support
 metrics.update({
     "walltime": exec_time,
-    "num_workers": config["benchmarking"]["NUM_CORES"],
-    "af": config["benchmarking"]["AF_NAME"],
+    "num_workers": utils.config["benchmarking"]["NUM_CORES"],
+    "af": utils.config["benchmarking"]["AF_NAME"],
     "dataset_source": dataset_source,
     "use_dask": USE_DASK,
     "use_servicex": USE_SERVICEX,
-    "systematics": config["benchmarking"]["SYSTEMATICS"],
+    "systematics": utils.config["benchmarking"]["SYSTEMATICS"],
     "n_files_max_per_sample": N_FILES_MAX_PER_SAMPLE,
-    "cores_per_worker": config["benchmarking"]["CORES_PER_WORKER"],
-    "chunksize": config["benchmarking"]["CHUNKSIZE"],
-    "disable_processing": config["benchmarking"]["DISABLE_PROCESSING"],
-    "io_file_percent": config["benchmarking"]["IO_FILE_PERCENT"]
+    "cores_per_worker": utils.config["benchmarking"]["CORES_PER_WORKER"],
+    "chunksize": utils.config["benchmarking"]["CHUNKSIZE"],
+    "disable_processing": utils.config["benchmarking"]["DISABLE_PROCESSING"],
+    "io_file_percent": utils.config["benchmarking"]["IO_FILE_PERCENT"]
 })
 
 # save metrics to disk
@@ -703,14 +628,14 @@ plt.title("Jet energy variations");
 # ML inference variables
 if USE_INFERENCE:
     fig, axs = plt.subplots(10,2,figsize=(14,40))
-    for i in range(len(config["ml"]["FEATURE_NAMES"])):
+    for i in range(len(utils.config["ml"]["FEATURE_NAMES"])):
         if i<10: 
             column=0
             row=i
         else: 
             column=1
             row=i-10
-        all_histograms['ml_hist_dict'][config["ml"]["FEATURE_NAMES"][i]][:, :, "nominal"].stack("process").project("observable").plot(
+        all_histograms['ml_hist_dict'][utils.config["ml"]["FEATURE_NAMES"][i]][:, :, "nominal"].stack("process").project("observable").plot(
             stack=True, 
             histtype="fill", 
             linewidth=1, 
@@ -726,9 +651,15 @@ if USE_INFERENCE:
 # This also builds pseudo-data by combining events from the various simulation setups we have processed.
 
 # %% tags=[]
+import utils
+import pickle
+# pickle.dump(all_histograms, open("all_histograms.p","wb"))
+all_histograms = pickle.load(open("all_histograms.p","rb"))
+
+# %% tags=[]
 utils.systematics.save_histograms(all_histograms['hist_dict'], fileset, "histograms.root", ["4j1b", "4j2b"])
 if USE_INFERENCE:
-    utils.systematics.save_histograms(all_histograms['ml_hist_dict'], fileset, "histograms_ml.root", config["ml"]["FEATURE_NAMES"])
+    utils.systematics.save_histograms(all_histograms['ml_hist_dict'], fileset, "histograms_ml.root", utils.config["ml"]["FEATURE_NAMES"], rebin=False)
 
 # %% [markdown]
 # ### Statistical inference
@@ -754,12 +685,6 @@ cabinetry.workspace.save(ws, "workspace.json")
 
 # %% tags=[]
 model, data = cabinetry.model_utils.model_and_data(ws)
-
-# %% tags=[]
-fit_results = cabinetry.fit.fit(model, data)
-
-# %% tags=[]
-model, data = cabinetry.model_utils.model_and_data(ws)
 fit_results = cabinetry.fit.fit(model, data)
 
 cabinetry.visualize.pulls(
@@ -779,22 +704,11 @@ print(f"\nfit result for ttbar_norm: {fit_results.bestfit[poi_index]:.3f} +/- {f
 
 # %%
 model_prediction = cabinetry.model_utils.prediction(model)
-figs = cabinetry.visualize.data_mc(model_prediction, data, close_figure=True, config=config)
-figs[0]["figure"]
-
-# %% tags=[]
-figs[1]["figure"]
+model_prediction_postfit = cabinetry.model_utils.prediction(model, fit_results=fit_results)
+figs = utils.plotting.plot_data_mc(model_prediction, model_prediction_postfit, data, config)
 
 # %% [markdown]
 # We can see very good post-fit agreement.
-
-# %% tags=[]
-model_prediction_postfit = cabinetry.model_utils.prediction(model, fit_results=fit_results)
-figs = cabinetry.visualize.data_mc(model_prediction_postfit, data, close_figure=True, config=config)
-figs[0]["figure"]
-
-# %% tags=[]
-figs[1]["figure"]
 
 # %% [markdown]
 # ### ML Validation

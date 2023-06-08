@@ -1,3 +1,4 @@
+import hist
 import json
 import numpy as np
 from servicex import ServiceXDataset
@@ -98,3 +99,20 @@ class ServiceXDatasetGroup():
             files_per_process.update({process: all_files[parent_key[self.filelist[:,1]==process]]})
 
         return files_per_process
+    
+def create_hist_dict(channel_names, num_bins, bin_range, hist_name, hist_label):
+    
+    hist_dict = {}
+    for i in range(len(channel_names)):
+        hist_dict[channel_names[i]] = (
+            hist.Hist.new.Reg(num_bins[i],
+                              bin_range[i][0],
+                              bin_range[i][1],
+                              name=hist_name[i],
+                              label=hist_label[i])
+            .StrCat([], name="process", label="Process", growth=True)
+            .StrCat([], name="variation", label="Systematic variation", growth=True)
+            .Weight()
+        )
+        
+    return hist_dict

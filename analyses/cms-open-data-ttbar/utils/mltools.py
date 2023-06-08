@@ -1,5 +1,12 @@
 import awkward as ak
 import numpy as np
+from xgboost import XGBClassifier
+from utils.load_config import config
+
+model_even = XGBClassifier()
+model_even.load_model(config["ml"]["XGBOOST_MODEL_PATH_EVEN"])
+model_odd = XGBClassifier()
+model_odd.load_model(config["ml"]["XGBOOST_MODEL_PATH_ODD"])
 
 def get_permutations_dict(MAX_N_JETS, include_labels=False, include_eval_mat=False):
     '''
@@ -88,7 +95,7 @@ def get_permutations_dict(MAX_N_JETS, include_labels=False, include_eval_mat=Fal
     else:
         return permutations_dict
     
-def get_features(jets, electrons, muons, permutations_dict):
+def get_features(jets, electrons, muons, max_n_jets=6):
     '''
     Calculate features for each of the 12 combinations per event
 
@@ -103,6 +110,8 @@ def get_features(jets, electrons, muons, permutations_dict):
         perm_counts: how many permutations in each event. use to unflatten features
     '''
 
+    permutations_dict = get_permutations_dict(max_n_jets)
+    
     # calculate number of jets in each event
     njet = ak.num(jets).to_numpy()
     # don't consider every jet for events with high jet multiplicity
@@ -169,3 +178,49 @@ def get_features(jets, electrons, muons, permutations_dict):
     features[:,19] = ak.flatten(jets[perms[...,3]].qgl).to_numpy()
 
     return features, perm_counts
+
+def get_inference_results_triton(features, even, triton_client, USE_TRITON, 
+                                 MODEL_NAME, MODEL_VERS_EVEN, MODEL_VERS_ODD):
+    results = np.zeros(features.shape[0])
+    
+    
+def get_inference_results_local(features, even, model_even, model_odd):
+    results = np.zeros(features.shape[0])
+    if len(features[even])>0:
+        results[even] = model_odd.predict_proba(
+            features[even,:]
+        )[:, 1]
+    if len(features[np.invert(even)])>0:
+        results[np.invert(even)] = results_odd = model_even.predict_proba(
+            features[np.invert(even),:]
+        )[:, 1]
+    return results
+
+def get_inference_results_triton(features, even, triton_client, 
+                                 MODEL_NAME, MODEL_VERS_EVEN, MODEL_VERS_ODD):
+    
+    results = np.zeros(features.shape[0])
+    
+    import tritonclient.grpc as grpcclient
+    output = grpcclient.InferRequestedOutput(output_name)
+        
+    if len(features[even])>0:
+        inpt = [grpcclient.InferInput(input_name, features[even].shape, dtype)]
+        inpt[0].set_data_from_numpy(features[even].astype(np.float32))
+        results[even]=triton_client.infer(
+            model_name=MODEL_NAME,
+            model_version=MODEL_VERS_EVEN,
+            inputs=inpt,
+            outputs=[output]
+        ).as_numpy(output_name)[:, 1]
+    if len(features[np.invert(even)])>0:
+        inpt = [grpcclient.InferInput(input_name, features[np.invert(even)].shape, dtype)]
+        inpt[0].set_data_from_numpy(features[np.invert(even)].astype(np.float32))
+        results[np.invert(even)]=triton_client.infer(
+            model_name=MODEL_NAME,
+            model_version=MODEL_VERS_ODD,
+            inputs=inpt,
+            outputs=[output]
+        ).as_numpy(output_name)[:, 1]
+    
+    return results

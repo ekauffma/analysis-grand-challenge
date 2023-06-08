@@ -651,12 +651,6 @@ if USE_INFERENCE:
 # This also builds pseudo-data by combining events from the various simulation setups we have processed.
 
 # %% tags=[]
-import utils
-import pickle
-# pickle.dump(all_histograms, open("all_histograms.p","wb"))
-all_histograms = pickle.load(open("all_histograms.p","rb"))
-
-# %% tags=[]
 utils.systematics.save_histograms(all_histograms['hist_dict'], fileset, "histograms.root", ["4j1b", "4j2b"])
 if USE_INFERENCE:
     utils.systematics.save_histograms(all_histograms['ml_hist_dict'], fileset, "histograms_ml.root", utils.config["ml"]["FEATURE_NAMES"], rebin=False)

@@ -130,14 +130,12 @@ class TtbarAnalysis(processor.ProcessorABC):
         num_bins = 25
         bin_low = 50
         bin_high = 550
-        name = "observable"
-        label = "observable [GeV]"
         self.hist_dict = utils.datadelivery.create_hist_dict(
             ["4j1b", "4j2b"],
-            [num_bins, num_bins],
-            [(bin_low, bin_high), (bin_low, bin_high)],
-            [name, name],
-            [label, label],
+            num_bins,
+            bin_low,
+            bin_high,
+            ["$m_{bjj}$ [GeV]", "$H_T$ [GeV]"],
         )
 
         self.use_dask = use_dask
@@ -145,12 +143,12 @@ class TtbarAnalysis(processor.ProcessorABC):
 
         self.use_inference = use_inference
         if self.use_inference:
-            n_features = len(utils.config["ml"]["FEATURE_NAMES"])
+            # initialize ML feature histograms if inference is enabled
             self.ml_hist_dict = utils.datadelivery.create_hist_dict(
                 utils.config["ml"]["FEATURE_NAMES"],
-                [num_bins] * n_features,
-                utils.config["ml"]["BIN_RANGES"],
-                [name] * n_features,
+                num_bins,
+                utils.config["ml"]["BIN_LOW"],
+                utils.config["ml"]["BIN_HIGH"],
                 utils.config["ml"]["FEATURE_DESCRIPTIONS"],
             )
             self.use_triton = use_triton
@@ -702,7 +700,7 @@ all_histograms["hist_dict"]["4j1b"][120j :: hist.rebin(2), :, "nominal"].stack(
 )[::-1].plot(stack=True, histtype="fill", linewidth=1, edgecolor="grey")
 plt.legend(frameon=False)
 plt.title("$\geq$ 4 jets, 1 b-tag")
-plt.xlabel("$H_T$ [GeV]");
+plt.show()
 
 # %% tags=[]
 all_histograms["hist_dict"]["4j2b"][120j :: hist.rebin(2), :, "nominal"].stack(
@@ -710,7 +708,7 @@ all_histograms["hist_dict"]["4j2b"][120j :: hist.rebin(2), :, "nominal"].stack(
 )[::-1].plot(stack=True, histtype="fill", linewidth=1, edgecolor="grey")
 plt.legend(frameon=False)
 plt.title("$\geq$ 4 jets, $\geq$ 2 b-tags")
-plt.xlabel("$m_{bjj}$ [GeV]");
+plt.show()
 
 # %% [markdown]
 # Our top reconstruction approach ($bjj$ system with largest $p_T$) has worked!

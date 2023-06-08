@@ -141,16 +141,45 @@ class ServiceXDatasetGroup:
         return files_per_process
 
 
-def create_hist_dict(channel_names, num_bins, bin_range, hist_name, hist_label):
+def create_hist_dict(channel_names, num_bins, bin_low, bin_high, hist_label):
+    """
+    Initialize dictionary of histograms accummulated in coffea processor
+
+    Args:
+        channel_names: arraylike object containing channel names, used as keys of dictionary
+        num_bins: arraylike (same length as channel_names) or scalar specifying number of bins per histogram
+        bin_low: arraylike (same length as channel_names) object or scalar specifying lower histogram ranges.
+        bin_high: arraylike (same length as channel_names) object or scalar specifying upper histogram ranges.
+        hist_label: arraylike (same length as channel_names) or scalar specifying label of histogram (displays while plotting)
+
+    Returns:
+        hist_dict: dictionary containing histograms associated with each channel
+    """
+    # ensure arguments have correct length
+    n_channels = len(channel_names)
+    for arg in [num_bins, bin_low, bin_high, hist_label]:
+        if hasattr(arg, "__len__"):
+            if not len(arg)==n_channels:
+                raise ValueError(
+                    f"If {arg} is not a scalar, it must have length equal to that of channel_names"
+                )
+                
     hist_dict = {}
     for i in range(len(channel_names)):
+        hist_args = [0,0,0,0]
+        for j, arg in enumerate([num_bins, bin_low, bin_high, hist_label]):
+            if hasattr(arg, "__len__"):
+                hist_args[j] = arg[i]
+            else:
+                hist_args[j] = arg
+        
         hist_dict[channel_names[i]] = (
             hist.Hist.new.Reg(
-                num_bins[i],
-                bin_range[i][0],
-                bin_range[i][1],
-                name=hist_name[i],
-                label=hist_label[i],
+                hist_args[0], # num_bins
+                hist_args[1], # bin_low
+                hist_args[2], # bin_high
+                name="observable",
+                label=hist_args[3], # hist_label
             )
             .StrCat([], name="process", label="Process", growth=True)
             .StrCat([], name="variation", label="Systematic variation", growth=True)

@@ -12,11 +12,6 @@ def jet_pt_resolution(pt):
     resolution_variation = np.random.normal(np.ones_like(pt_flat), 0.05)
     return ak.unflatten(resolution_variation, counts)
 
-
-ttbar_variations = ["ME_var", "PS_var", "scaleup", "scaledown"]
-wjets_variations = ["scale_var_down", "scale_var_up"]
-
-
 def save_histograms(hist_dict, fileset, filename, channel_names, rebin=True):
     nominal_samples = [sample for sample in fileset.keys() if "nominal" in sample]
 
@@ -54,10 +49,12 @@ def save_histograms(hist_dict, fileset, filename, channel_names, rebin=True):
                     ] = current_hist[:, sample_name, variation_name]
 
             # ttbar modeling
+            ttbar_variations = ["ME_var", "PS_var", "scaleup", "scaledown"]
             for var in ttbar_variations:
                 out_dict[f"{channel}_ttbar_{var}"] = current_hist[:, "ttbar", var]
 
             # W+jets scale
+            wjets_variations = ["scale_var_down", "scale_var_up"]
             for var in wjets_variations:
                 out_dict[f"{channel}_wjets_{var}"] = current_hist[:, "wjets", var]
 

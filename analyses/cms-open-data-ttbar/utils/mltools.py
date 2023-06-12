@@ -208,16 +208,6 @@ def get_features(jets, electrons, muons, max_n_jets=6):
     return features, perm_counts
 
 
-def get_inference_results_triton(
-    features,
-    even,
-    triton_client,
-    USE_TRITON,
-    MODEL_NAME,
-    MODEL_VERS_EVEN,
-    MODEL_VERS_ODD,
-):
-    results = np.zeros(features.shape[0])
 
 
 def get_inference_results_local(features, even, model_even, model_odd):
